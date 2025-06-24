@@ -1,0 +1,2072 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-lang-key="title">نموذج فحص المركبات التفاعلي</title>
+    <!-- Chosen Palette: Rento Identity Colors (HTML: 80276C, A51890, BB16A3, FA4616, FFA300) -->
+    <!-- Application Structure Plan: A single-page, progressive form application with multi-language support and dynamic modes (Pickup/Return). The user moves from top to bottom, filling out each section. The structure follows the logical flow of an actual vehicle inspection: basic info, exterior, interior, accessories, media attachments, and finally a dynamic summary including a star rating and a report duration timer. This was chosen over a multi-column layout for better mobile-friendliness and a more intuitive, step-by-step user experience that mirrors the real-world process described in the source report. Interactive elements like a clickable car diagram and dynamic checklists transform the static guide into a practical tool. -->
+    <!-- Visualization & Content Choices: 
+        - Basic Info: Report Info -> Goal: Organize/Inform -> Presentation: HTML Form Inputs. -> Interaction: User types data which is stored in a JS object for later summary. Justification: Standard and intuitive for data entry.
+        - Exterior Inspection: Report Info -> Goal: Organize/Compare -> Presentation: A clickable car diagram made with HTML/CSS divs. -> Interaction: Clicking a car part opens a modal to log damage type and notes. Automatic default estimated price based on damage type and part (including deep scratches), conditionally visible based on mode. Justification: Highly interactive and visual, making it easy to pinpoint damage locations. Automated pricing improves efficiency, with mode-based visibility for client interaction.
+        - Interior & Accessories: Report Info -> Goal: Organize -> Presentation: Dynamic checklists. -> Interaction: User clicks buttons to set status (OK/Note), which reveals a text input. Justification: Fast, clear, and allows for optional details, improving efficiency. (Checklist items restored and fixed for duplication).
+        - Media Attachments: Report Info -> Goal: Document -> Presentation: File input fields with previews for images. -> Interaction: Users select/capture files. Previews shown for images. Justification: Provides a direct way to attach visual evidence, crucial for inspection, with a necessary disclaimer about client-client-side storage.
+        - Overall Car Rating: Report Info -> Goal: Inform/Summarize -> Presentation: Interactive Star Rating. -> Interaction: User clicks stars to set rating. Justification: Intuitive and visually engaging way to capture an overall sentiment of the car's condition, similar to familiar UI patterns.
+        - Damage Summary: Report Info -> Goal: Compare/Inform -> Presentation: Chart.js Donut Chart. -> Interaction: The chart updates automatically as damages are logged. Estimated prices in summary are conditionally visible based on mode. Justification: Provides an immediate, easy-to-understand visual summary of the vehicle's condition, with mode-based visibility for client interaction.
+        - Report Duration Timer: Report Info -> Goal: Track Performance -> Presentation: Display of elapsed time. -> Interaction: Timer starts on load, stops on print button click. Justification: Provides a clear metric for time spent on the report, addressing the user's need for performance tracking for incentives.
+        - AI Summary Generation: Report Info -> Goal: Synthesize/Inform -> Presentation: Button, Text Area (for AI output), Loading Indicator. -> Interaction: Button click triggers LLM call to Gemini API, which processes all recorded inspection data into a professional summary. Justification: Enhances efficiency and consistency in reporting, providing a valuable AI-powered feature.
+        - Repair Invoice Generation: Report Info -> Goal: Inform/Calculate/Finance -> Presentation: Button, Table for invoice details (part, cost, subtotal, VAT, total). -> Interaction: Button click triggers calculation and dynamic display of invoice. Only appears in "pickup" mode. Justification: Directly fulfills user's request for financial summary with VAT, crucial for client communication.
+        - Library/Method: Vanilla JS for all logic, Chart.js for visualization, Tailwind CSS for styling. Gemini API (gemini-2.0-flash) for LLM.
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Almarai:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Almarai', sans-serif;
+            scroll-behavior: smooth;
+        }
+        .car-diagram {
+            border: 2px solid #e5e7eb;
+            background-color: #f9fafb;
+            width: 100%;
+            max-width: 400px;
+            height: 200px;
+        }
+        .car-part {
+            border: 1px solid #d1d5db;
+            background-color: #f3f4f6;
+            transition: background-color 0.2s;
+            position: absolute;
+            /* Increase touch target size for better mobile interaction */
+            min-width: 30px; 
+            min-height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem; /* Smaller text for better fit */
+            color: #6b7280;
+            text-align: center;
+            padding: 5px; /* Add some padding */
+            box-sizing: border-box; /* Include padding in dimensions */
+        }
+        .car-part:hover {
+            background-color: #dbeafe;
+        }
+        .has-damage-indicator {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #FA4616; /* Rento Orange-Red */
+        }
+        .modal-backdrop {
+            transition: opacity 0.3s ease-in-out;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 350px;
+        }
+        .image-preview-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .image-preview {
+            width: 80px;
+            height: 80px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }
+        .file-list-item {
+            padding: 8px;
+            background-color: #f3f4f6;
+            border-radius: 6px;
+            font-size: 0.9em;
+            color: #4b5563;
+        }
+        .star-rating .star {
+            cursor: pointer;
+            color: #d1d5db; /* Default grey */
+            font-size: 2.5rem; /* Larger stars */
+            transition: color 0.2s;
+        }
+        .star-rating .star.selected {
+            color: #FFA300; /* Rento Gold for selected stars */
+        }
+        .loading-spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #fff;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Hide price elements when in 'return' mode (interactive) */
+        body.mode-return #estimated-price-display,
+        body.mode-return label[data-lang-key="modal.estimatedPriceLabel"],
+        body.mode-return #generate-invoice-button,
+        body.mode-return #invoice-section {
+            display: none !important;
+        }
+        body.mode-return .price-info-summary {
+            display: none !important;
+        }
+
+        /* Styles for mode buttons */
+        .mode-button-container button {
+            border: 1px solid #d1d5db;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            padding: 0.75rem 1.5rem; /* py-3 px-6 */
+        }
+        .mode-button-container button.active {
+            border-color: #80276C; /* Darker Rento purple for active border */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        /* Specific active style for return mode */
+        #mode-return.active {
+            background-color: #BB16A3 !important; /* Rento Purple */
+            color: white !important;
+        }
+
+        /* Print Specific Styles */
+        @media print {
+            body {
+                background-color: #fff !important;
+                color: #000 !important;
+                margin: 0;
+                padding: 0;
+                font-size: 12pt;
+            }
+            .container {
+                max-width: none !important;
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 10mm !important;
+            }
+            section {
+                border: 1px solid #ccc !important;
+                box-shadow: none !important;
+                margin-bottom: 10mm !important;
+                padding: 10mm !important;
+                page-break-inside: avoid; /* Avoid breaking sections across pages */
+            }
+            h1, h2, h3 {
+                color: #000 !important;
+                border-color: #ccc !important;
+            }
+            /* Hide interactive elements */
+            input, textarea, select, button, .modal-backdrop,
+            #photo-upload, #video-upload, #generate-ai-summary-button,
+            #report-timer, .car-part, .has-damage-indicator, .print-hidden,
+            #modal-title, #damage-type-label, #damage-notes-label, #damage-notes,
+            #cancel-damage, #save-damage {
+                display: none !important;
+            }
+
+            /* Display input values as static text */
+            .input-field-print {
+                display: block !important;
+                font-size: 1em;
+                margin-bottom: 0.5em;
+                color: #000;
+            }
+            .input-field-print span {
+                font-weight: normal;
+                color: #333;
+            }
+
+            /* Ensure all collected data is visible */
+            #damage-summary-list, #ai-summary-output,
+            #car-condition-rating-stars, #selected-rating-text,
+            #final-duration-text, #invoice-section {
+                display: block !important;
+                overflow: visible !important;
+                height: auto !important;
+                background-color: transparent !important;
+                border: none !important;
+                padding: 0 !important;
+                text-align: right !important; /* Adjust text alignment for print */
+            }
+            
+            #damage-summary-list div, #ai-summary-output p {
+                padding: 0 !important;
+                border: none !important;
+                background-color: transparent !important;
+                margin-bottom: 5px;
+            }
+
+            .star-rating .star {
+                color: #FFA300 !important; /* Ensure stars are gold in print */
+            }
+
+            .flex.gap-6 {
+                display: block !important; /* Stack fields vertically in print */
+            }
+            .grid-cols-1, .md\:grid-cols-2 {
+                display: block !important;
+            }
+            .space-y-4 > div {
+                margin-bottom: 5px;
+            }
+            .checklist-item-print {
+                display: flex !important;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 5px;
+            }
+            .checklist-item-print .status-print {
+                font-weight: bold;
+                color: #000;
+            }
+            .checklist-item-print .note-print {
+                font-style: italic;
+                font-size: 0.9em;
+                color: #555;
+            }
+            /* Hide car diagram and only show the summary for print */
+            .car-diagram {
+                display: none !important;
+            }
+            .image-preview-container {
+                display: block !important; /* Ensure image previews are block for proper flow */
+            }
+            .image-preview {
+                display: inline-block !important; /* Make image previews inline-block to flow horizontally */
+                margin-left: 5px; /* Add some margin between images */
+                margin-bottom: 5px; /* Add some margin below images */
+            }
+            .file-list-item {
+                display: block !important;
+                background: none !important;
+                border: none !important;
+                padding: 0 !important;
+            }
+            /* Display the final duration text */
+            #final-duration-text {
+                display: block !important;
+            }
+
+            /* Invoice specific print styles */
+            #invoice-section {
+                margin-top: 10mm !important;
+                border-top: 1px solid #ccc !important;
+                padding-top: 10mm !important;
+            }
+            #invoice-section h3 {
+                text-align: center !important;
+                margin-bottom: 5mm !important;
+            }
+            .invoice-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 5mm;
+            }
+            .invoice-table th, .invoice-table td {
+                border: 1px solid #eee;
+                padding: 3mm;
+                text-align: right;
+            }
+            .invoice-table tfoot td {
+                font-weight: bold;
+            }
+            .invoice-table thead {
+                background-color: #f2f2f2;
+            }
+        }
+        /* Style for highlighting invalid fields */
+        .highlight-error {
+            border: 2px solid #ef4444 !important; /* Red border for error */
+            background-color: #fef2f2 !important; /* Light red background */
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+    <div class="container mx-auto p-4 md:p-8 max-w-4xl">
+
+        <header class="text-center mb-10">
+            <h1 id="main-title" class="text-3xl md:text-4xl font-bold text-slate-900" data-lang-key="header.title">نموذج فحص المركبات التفاعلي</h1>
+            <p id="main-description" class="mt-2 text-lg text-slate-600" data-lang-key="header.description">أداة لتوثيق حالة السيارة عند الاستلام والتسليم بدقة وشفافية.</p>
+            <div class="mt-4 flex justify-center gap-4 print-hidden">
+                <button id="lang-ar" class="bg-[#FA4616] text-white font-bold py-2 px-4 rounded-lg hover:bg-[#FFA300] transition-colors">العربية</button>
+                <button id="lang-en" class="bg-slate-200 text-slate-800 font-bold py-2 px-4 rounded-lg hover:bg-slate-300 transition-colors">English</button>
+            </div>
+            <div class="mt-6 flex justify-center gap-4 mode-button-container">
+                <button id="mode-pickup" class="bg-[#FA4616] text-white font-bold py-3 px-8 rounded-lg hover:bg-[#FFA300] transition-colors active" data-lang-key="modes.pickup">استلام المركبة</button>
+                <button id="mode-return" class="bg-slate-200 text-slate-800 font-bold py-3 px-8 rounded-lg hover:bg-slate-300 transition-colors" data-lang-key="modes.return">تسليم المركبة</button>
+            </div>
+        </header>
+
+        <!-- Section 1: Basic Information -->
+        <section id="basic-info" class="mb-12 bg-white p-6 rounded-2xl shadow-sm border border-[#A51890]">
+            <h2 id="basic-info-title" class="text-2xl font-bold mb-4 border-r-4 border-[#80276C] pr-4" data-lang-key="sections.basicInfo.title">1. المعلومات الأساسية</h2>
+            <p id="basic-info-description" class="text-slate-600 mb-6" data-lang-key="sections.basicInfo.description">ابدأ بإدخال معلومات العقد، العميل، السيارة، بالإضافة إلى بيانات الموظف. هذه البيانات أساسية لتوثيق عملية الفحص بشكل صحيح وربطها بالعميل والموظف المناسبين.</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="print-field">
+                    <label for="contract-number" class="hidden print-only input-field-print" data-lang-key="sections.basicInfo.labels.contractNumber">رقم العقد: <span id="print-contract-number"></span></label>
+                    <input type="text" id="contract-number" data-lang-key="sections.basicInfo.placeholders.contractNumber" placeholder="رقم العقد" class="w-full p-3 bg-slate-100 rounded-lg border-transparent focus:ring-2 focus:ring-[#BB16A3] focus:border-transparent">
+                </div>
+                <div class="print-field">
+                    <label for="customer-name" class="hidden print-only input-field-print" data-lang-key="sections.basicInfo.labels.customerName">اسم العميل: <span id="print-customer-name"></span></label>
+                    <input type="text" id="customer-name" data-lang-key="sections.basicInfo.placeholders.customerName" placeholder="اسم العميل" class="w-full p-3 bg-slate-100 rounded-lg border-transparent focus:ring-2 focus:ring-[#BB16A3] focus:border-transparent">
+                </div>
+                <div class="print-field">
+                    <label for="car-model" class="hidden print-only input-field-print" data-lang-key="sections.basicInfo.labels.carModel">نوع السيارة وطرازها: <span id="print-car-model"></span></label>
+                    <input type="text" id="car-model" data-lang-key="sections.basicInfo.placeholders.carModel" placeholder="نوع السيارة وطرازها" class="w-full p-3 bg-slate-100 rounded-lg border-transparent focus:ring-2 focus:ring-[#BB16A3] focus:border-transparent">
+                </div>
+                <div class="print-field">
+                    <label for="license-plate" class="hidden print-only input-field-print" data-lang-key="sections.basicInfo.labels.licensePlate">رقم لوحة السيارة: <span id="print-license-plate"></span></label>
+                    <input type="text" id="license-plate" data-lang-key="sections.basicInfo.placeholders.licensePlate" placeholder="رقم لوحة السيارة" class="w-full p-3 bg-slate-100 rounded-lg border-transparent focus:ring-2 focus:ring-[#BB16A3] focus:border-transparent">
+                </div>
+                <div class="print-field">
+                    <label for="car-kms" class="hidden print-only input-field-print" data-lang-key="sections.basicInfo.labels.carKms">قراءة عداد الكيلومترات: <span id="print-car-kms"></span></label>
+                    <input type="number" id="car-kms" data-lang-key="sections.basicInfo.placeholders.carKms" placeholder="قراءة عداد الكيلومترات" class="w-full p-3 bg-slate-100 rounded-lg border-transparent focus:ring-2 focus:ring-[#BB16A3] focus:border-transparent">
+                </div>
+                <div class="print-field">
+                    <label for="employee-name" class="hidden print-only input-field-print" data-lang-key="sections.basicInfo.labels.employeeName">اسم الموظف: <span id="print-employee-name"></span></label>
+                    <input type="text" id="employee-name" data-lang-key="sections.basicInfo.placeholders.employeeName" placeholder="اسم الموظف" class="w-full p-3 bg-slate-100 rounded-lg border-transparent focus:ring-2 focus:ring-[#BB16A3] focus:border-transparent">
+                </div>
+                <div class="print-field">
+                    <label for="employee-id" class="hidden print-only input-field-print" data-lang-key="sections.basicInfo.labels.employeeId">الرقم الوظيفي للموظف: <span id="print-employee-id"></span></label>
+                    <input type="text" id="employee-id" data-lang-key="sections.basicInfo.placeholders.employeeId" placeholder="الرقم الوظيفي للموظف" class="w-full p-3 bg-slate-100 rounded-lg border-transparent focus:ring-2 focus:ring-[#BB16A3] focus:border-transparent">
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 2: Exterior Inspection -->
+        <section id="exterior-inspection" class="mb-12 bg-white p-6 rounded-2xl shadow-sm border border-[#A51890]">
+            <h2 id="exterior-title" class="text-2xl font-bold mb-4 border-r-4 border-[#80276C] pr-4" data-lang-key="sections.exterior.title">2. فحص الهيكل الخارجي</h2>
+            <p id="exterior-description" class="text-slate-600 mb-6" data-lang-key="sections.exterior.description">انقر على أي جزء في مخطط السيارة أدناه لتسجيل أي أضرار مثل الخدوش أو الضربات. سيظهر مؤشر أحمر على الأجزاء التي لديها ملاحظات مسجلة.</p>
+            
+            <!-- Accident Checkbox -->
+            <div class="flex items-center mb-4">
+                <input type="checkbox" id="accident-checkbox" class="h-5 w-5 text-[#FA4616] rounded border-gray-300 focus:ring-[#BB16A3]">
+                <label for="accident-checkbox" class="ml-2 text-slate-700 font-medium" data-lang-key="sections.exterior.accidentLabel">حادث</label>
+            </div>
+
+            <!-- Other Damages Checkbox/Radio -->
+            <div class="mb-6">
+                <label class="block text-slate-700 font-medium mb-2" data-lang-key="sections.exterior.otherDamagesQuestion">هل توجد تلفيات لا تخص الحادث؟</label>
+                <div class="flex gap-4">
+                    <div class="flex items-center">
+                        <input type="radio" id="other-damages-yes" name="other-damages" value="yes" class="h-4 w-4 text-[#FA4616] border-gray-300 focus:ring-[#BB16A3]" checked>
+                        <label for="other-damages-yes" class="ml-2 text-slate-700" data-lang-key="general.yes">نعم</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input type="radio" id="other-damages-no" name="other-damages" value="no" class="h-4 w-4 text-[#FA4616] border-gray-300 focus:ring-[#BB16A3]">
+                        <label for="other-damages-no" class="ml-2 text-slate-700" data-lang-key="general.no">لا</label>
+                    </div>
+                </div>
+            </div>
+
+            <div id="car-diagram-container" class="flex justify-center items-center">
+                <div class="car-diagram rounded-lg relative overflow-hidden">
+                    <!-- Car Body - Increased sizes for better touch interaction -->
+                    <div class="car-part" id="roof" style="top: 20%; left: 20%; width: 60%; height: 60%;" data-lang-key="carParts.roof">السقف</div>
+                    <!-- Hood -->
+                    <div class="car-part" id="hood" style="top: 30%; left: 75%; width: 20%; height: 40%;" data-lang-key="carParts.hood">غطاء المحرك</div>
+                    <!-- Trunk -->
+                    <div class="car-part" id="trunk" style="top: 30%; left: 5%; width: 20%; height: 40%;" data-lang-key="carParts.trunk">الصندوق الخلفي</div>
+                    <!-- Doors -->
+                    <div class="car-part" id="front-right-door" style="top: 20%; left: 50%; width: 25%; height: 30%;" data-lang-key="carParts.frontRightDoor">الباب الأمامي الأيمن</div>
+                    <div class="car-part" id="back-right-door" style="top: 50%; left: 50%; width: 25%; height: 30%;" data-lang-key="carParts.backRightDoor">الباب الخلفي الأيمن</div>
+                    <div class="car-part" id="front-left-door" style="top: 20%; left: 25%; width: 25%; height: 30%;" data-lang-key="carParts.frontLeftDoor">الباب الأمامي الأيسر</div>
+                    <div class="car-part" id="back-left-door" style="top: 50%; left: 25%; width: 25%; height: 30%;" data-lang-key="carParts.backLeftDoor">الباب الخلفي الأيسر</div>
+                    <!-- Fenders & Bumpers -->
+                    <div class="car-part" id="front-bumper" style="top: 20%; left: 90%; width: 10%; height: 60%;" data-lang-key="carParts.frontBumper">المصد الأمامي</div>
+                    <div class="car-part" id="rear-bumper" style="top: 20%; left: 0%; width: 10%; height: 60%;" data-lang-key="carParts.rearBumper">المصد الخلفي</div>
+                    <!-- Glass -->
+                    <div class="car-part" id="windshield" style="top: 25%; left: 68%; width: 7%; height: 50%; background-color: #d1fafe;" data-lang-key="carParts.windshield">زجاج أمامي</div>
+                    <div class="car-part" id="rear-glass" style="top: 25%; left: 20%; width: 7%; height: 50%; background-color: #d1fafe;" data-lang-key="carParts.rearGlass">زجاج خلفي</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 3: Interior & Accessories -->
+        <section id="interior-inspection" class="mb-12 bg-white p-6 rounded-2xl shadow-sm border border-[#A51890]">
+            <h2 id="interior-title" class="text-2xl font-bold mb-4 border-r-4 border-[#80276C] pr-4" data-lang-key="sections.interior.title">3. فحص المقصورة والملحقات</h2>
+            <p id="interior-description" class="text-slate-600 mb-6" data-lang-key="sections.interior.description">تحقق من حالة المكونات الداخلية والملحقات الأساسية للسيارة. حدد حالة كل عنصر، وأضف ملاحظات إذا لزم الأمر.</p>
+            <div id="checklist-container" class="space-y-4"></div>
+        </section>
+
+        <!-- Section 4: Media Attachments -->
+        <section id="media-attachments" class="mb-12 bg-white p-6 rounded-2xl shadow-sm border border-[#A51890]">
+            <h2 id="media-title" class="text-2xl font-bold mb-4 border-r-4 border-[#80276C] pr-4" data-lang-key="sections.media.title">4. الوسائط المرفقة (صور وفيديو)</h2>
+            <p id="media-description" class="text-slate-600 mb-4" data-lang-key="sections.media.description">يمكنك إرفاق صور وفيديوهات لتوثيق حالة السيارة. <span class="font-bold text-red-600" data-lang-key="sections.media.note">ملاحظة هامة: هذه الملفات لن يتم حفظها بشكل دائم في هذا التطبيق (الخالية من الخادم). لإنتاج نظام فعال، ستحتاج لربطه بحلول تخزين سحابي أو خادم خلفي.</span></p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="photo-upload" class="block text-slate-700 font-medium mb-2 print-hidden" data-lang-key="sections.media.labels.photo">إرفاق صور (أو التقاط بالكاميرا)</label>
+                    <input type="file" id="photo-upload" accept="image/*" multiple capture="camera" class="w-full p-3 bg-slate-100 rounded-lg border-transparent focus:ring-2 focus:ring-[#BB16A3] focus:border-transparent print-hidden">
+                    <div id="photo-previews" class="image-preview-container"></div>
+                </div>
+                <div>
+                    <label for="video-upload" class="block text-slate-700 font-medium mb-2 print-hidden" data-lang-key="sections.media.labels.video">إرفاق فيديو (أو التقاط بالكاميرا)</label>
+                    <input type="file" id="video-upload" accept="video/*" multiple capture="camcorder" class="w-full p-3 bg-slate-100 rounded-lg border-transparent focus:ring-2 focus:ring-[#BB16A3] focus:border-transparent print-hidden">
+                    <div id="video-file-list" class="flex flex-col gap-2 mt-2"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 5: Summary -->
+        <section id="summary" class="mb-12 bg-white p-6 rounded-2xl shadow-sm border border-[#A51890]">
+            <h2 id="summary-title" class="text-2xl font-bold mb-4 border-r-4 border-[#80276C] pr-4" data-lang-key="sections.summary.title">5. الملخص والتقرير</h2>
+            <p id="summary-description" class="text-slate-600 mb-6" data-lang-key="sections.summary.description">هنا يمكنك مراجعة جميع الملاحظات المسجلة والحصول على نظرة عامة على حالة السيارة. الرسم البياني يوضح توزيع أنواع الأضرار المسجلة.</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+                <div>
+                    <h3 id="notes-list-title" class="text-xl font-bold mb-4" data-lang-key="sections.summary.notesListTitle">قائمة الملاحظات</h3>
+                    <div id="damage-summary-list" class="space-y-3 text-slate-700 h-80 overflow-y-auto p-3 bg-slate-50 rounded-lg">
+                        <p id="no-notes-message" class="text-slate-500" data-lang-key="sections.summary.noNotes">لم يتم تسجيل أي ملاحظات بعد.</p>
+                    </div>
+                </div>
+                <div>
+                    <h3 id="damage-distribution-title" class="text-xl font-bold mb-4 text-center" data-lang-key="sections.summary.damageDistributionTitle">توزيع الأضرار</h3>
+                    <div class="chart-container">
+                        <canvas id="damage-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Car Condition Rating -->
+            <div class="mt-8 pt-6 border-t border-slate-200">
+                <h3 id="rating-title" class="text-xl font-bold mb-4 text-center" data-lang-key="sections.summary.ratingTitle">تقييم حالة السيارة العامة عند الاستلام</h3>
+                <div id="car-condition-rating-stars" class="flex justify-center space-x-2 text-4xl star-rating print-hidden">
+                    <span class="star" data-value="1">★</span>
+                    <span class="star" data-value="2">★</span>
+                    <span class="star" data-value="3">★</span>
+                    <span class="star" data-value="4">★</span>
+                    <span class="star" data-value="5">★</span>
+                </div>
+                <p id="selected-rating-text" class="text-center text-slate-600 mt-2" data-lang-key="sections.summary.notRated">لم يتم التقييم بعد</p>
+            </div>
+
+            <!-- Report Duration Timer -->
+            <div class="mt-8 pt-6 border-t border-slate-200">
+                <h3 id="duration-title" class="text-xl font-bold mb-4 border-r-4 border-[#80276C] pr-4" data-lang-key="sections.duration.title">6. مدة إعداد التقرير</h3>
+                <p id="duration-description" class="text-slate-600 mb-4 print-hidden" data-lang-key="sections.duration.description">يتتبع هذا المؤقت الوقت المستغرق في إعداد التقرير، ويتوقف عند طباعة التقرير.</p>
+                <div class="text-center text-3xl font-bold text-[#FA4616]">
+                    <span id="report-timer">00:00</span>
+                </div>
+                <p id="final-duration-text" class="text-center text-slate-600 mt-2 hidden" data-lang-key="sections.duration.finalDuration">المدة النهائية: <span id="final-duration-value" class="font-bold"></span></p>
+            </div>
+
+            <!-- AI Generated Summary -->
+            <div class="mt-8 pt-6 border-t border-slate-200">
+                <h3 id="ai-summary-main-title" class="text-xl font-bold mb-4 border-r-4 border-[#80276C] pr-4" data-lang-key="sections.aiSummary.title">7. ملخص التقرير بالذكاء الاصطناعي</h3>
+                <p id="ai-summary-description" class="text-slate-600 mb-4 print-hidden" data-lang-key="sections.aiSummary.description">احصل على ملخص احترافي لحالة السيارة بناءً على ملاحظاتك.</p>
+                <button id="generate-ai-summary-button" class="bg-[#A51890] text-white font-bold py-3 px-8 rounded-lg hover:bg-[#80276C] transition-colors flex items-center justify-center gap-2 print-hidden">
+                    <span id="ai-button-text" data-lang-key="sections.aiSummary.buttonText">✨ توليد ملخص التقرير بالذكاء الاصطناعي</span>
+                    <div id="ai-loading-spinner" class="loading-spinner hidden"></div>
+                </button>
+                <div id="ai-summary-output" class="mt-4 p-4 bg-slate-50 rounded-lg border border-slate-200 text-slate-700 min-h-[100px] flex items-center justify-center text-center">
+                    <p data-lang-key="sections.aiSummary.placeholder">سيظهر الملخص المولّد بالذكاء الاصطناعي هنا.</p>
+                </div>
+            </div>
+
+            <!-- Repair Invoice Section -->
+            <div id="invoice-section" class="mt-8 pt-6 border-t border-slate-200" style="display: none;">
+                <h3 id="invoice-title" class="text-xl font-bold mb-4 border-r-4 border-[#80276C] pr-4" data-lang-key="sections.invoice.title">8. فاتورة الإصلاح التقديرية</h3>
+                <p id="invoice-intro-text" class="text-slate-600 mb-4" data-lang-key="sections.invoice.description">ملخص تقديري لتكاليف الإصلاحات المحتملة مع احتساب ضريبة القيمة المضافة.</p>
+                
+                <div id="invoice-details-container" class="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                    <table class="invoice-table w-full text-right text-slate-700">
+                        <thead>
+                            <tr class="bg-slate-200">
+                                <th class="p-2 border-b border-slate-300" data-lang-key="sections.invoice.headers.item">القطعة / البند</th>
+                                <th class="p-2 border-b border-slate-300" data-lang-key="sections.invoice.headers.cost">التكلفة (ريال)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="invoice-items-body">
+                            <!-- Invoice items will be dynamically inserted here -->
+                        </tbody>
+                        <tfoot class="font-bold">
+                            <tr>
+                                <td class="p-2 border-t border-slate-300" data-lang-key="sections.invoice.labels.subtotal">المجموع الفرعي:</td>
+                                <td class="p-2 border-t border-slate-300" id="invoice-subtotal">0</td>
+                            </tr>
+                            <tr>
+                                <td class="p-2 border-t border-slate-300" data-lang-key="sections.invoice.labels.vat">ضريبة القيمة المضافة (15%):</td>
+                                <td class="p-2 border-t border-slate-300" id="invoice-vat">0</td>
+                            </tr>
+                            <tr>
+                                <td class="p-2 border-t border-slate-300" data-lang-key="sections.invoice.labels.total">المجموع الكلي:</td>
+                                <td class="p-2 border-t border-slate-300" id="invoice-total">0</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                    <p id="no-repair-costs-message" class="text-center text-slate-500 mt-4" data-lang-key="sections.invoice.noRepairCosts">لا توجد تكاليف إصلاح رقمية لتضمينها في الفاتورة.</p>
+                </div>
+            </div>
+
+            <div class="mt-8 pt-6 border-t border-slate-200 text-center flex justify-center gap-4">
+                 <button id="generate-invoice-button" class="bg-[#A51890] text-white font-bold py-3 px-8 rounded-lg hover:bg-[#80276C] transition-colors print-hidden" data-lang-key="buttons.generateInvoice">
+                    إنشاء فاتورة الإصلاح
+                </button>
+                 <button id="print-report-button" class="bg-[#FA4616] text-white font-bold py-3 px-8 rounded-lg hover:bg-[#FFA300] transition-colors" data-lang-key="buttons.printReport">
+                    طباعة التقرير / حفظ PDF
+                </button>
+            </div>
+        </section>
+    </div>
+
+    <!-- Damage Modal -->
+    <div id="damage-modal" class="modal-backdrop fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center p-4 hidden opacity-0 print-hidden">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 transform scale-95 transition-transform">
+            <h3 id="modal-title" class="text-2xl font-bold mb-4" data-lang-key="modal.damageTitle">تسجيل ضرر</h3>
+            <form id="damage-form">
+                <input type="hidden" id="part-id">
+                <div class="mb-4">
+                    <label for="damage-type" class="block text-slate-700 font-medium mb-2" data-lang-key="modal.damageTypeLabel">نوع الضرر</label>
+                    <select id="damage-type" class="w-full p-3 bg-slate-100 rounded-lg border-transparent focus:ring-2 focus:ring-[#BB16A3] focus:border-transparent">
+                        <option value="خدش بسيط" data-lang-key="damageOptions.minorScratch">خدش بسيط</option>
+                        <option value="خدش عميق" data-lang-key="damageOptions.deepScratch">خدش عميق</option>
+                        <option value="ضربة" data-lang-key="damageOptions.dent">ضربة</option>
+                        <option value="كسر" data-lang-key="damageOptions.crack">كسر</option>
+                        <option value="مفقود" data-lang-key="damageOptions.missing">مفقود</option>
+                        <option value="أخرى" data-lang-key="damageOptions.other">أخرى</option>
+                    </select>
+                </div>
+                <!-- Removed Repair Type Select -->
+                <div class="mb-6">
+                    <p class="block text-slate-700 font-medium mb-2" data-lang-key="modal.estimatedPriceLabel">السعر التقديري:</p>
+                    <p id="estimated-price-display" class="text-xl font-bold text-[#80276C]">--</p>
+                </div>
+                <div class="mb-6">
+                    <label for="damage-notes" class="block text-slate-700 font-medium mb-2" data-lang-key="modal.notesLabel">ملاحظات</label>
+                    <textarea id="damage-notes" rows="3" data-lang-key="modal.notesPlaceholder" placeholder="مثال: خدش بطول 5 سم أسفل المقبض" class="w-full p-3 bg-slate-100 rounded-lg border-transparent focus:ring-2 focus:ring-[#BB16A3] focus:border-transparent"></textarea>
+                </div>
+                <div class="flex justify-end gap-3">
+                    <button type="button" id="cancel-damage" class="bg-slate-200 text-slate-800 font-bold py-2 px-6 rounded-lg hover:bg-slate-300 transition-colors" data-lang-key="modal.cancelButton">إلغاء</button>
+                    <button type="submit" class="bg-[#A51890] text-white font-bold py-2 px-6 rounded-lg hover:bg-[#80276C] transition-colors" data-lang-key="modal.saveButton">حفظ</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Generic Message Modal -->
+    <div id="message-modal" class="modal-backdrop fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center p-4 hidden opacity-0">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 transform scale-95 transition-transform">
+            <h3 id="message-modal-title" class="text-2xl font-bold mb-4"></h3>
+            <p id="message-modal-content" class="text-slate-700 mb-6"></p>
+            <div class="flex justify-end">
+                <button type="button" id="message-modal-ok-button" class="bg-[#A51890] text-white font-bold py-2 px-6 rounded-lg hover:bg-[#80276C] transition-colors" data-lang-key="validation.okButton">موافق</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            let currentLanguage = 'ar'; // Default language
+
+            const translations = {
+                'ar': {
+                    title: 'نموذج فحص المركبات التفاعلي',
+                    header: {
+                        title: 'نموذج فحص المركبات التفاعلي',
+                        description: 'أداة لتوثيق حالة السيارة عند الاستلام والتسليم بدقة وشفافية.'
+                    },
+                    sections: {
+                        basicInfo: {
+                            title: '1. المعلومات الأساسية',
+                            description: 'ابدأ بإدخال معلومات العقد، العميل، السيارة، بالإضافة إلى بيانات الموظف. هذه البيانات أساسية لتوثيق عملية الفحص بشكل صحيح وربطها بالعميل والموظف المناسبين.',
+                            labels: {
+                                contractNumber: 'رقم العقد:',
+                                customerName: 'اسم العميل:',
+                                carModel: 'نوع السيارة وطرازها:',
+                                licensePlate: 'رقم لوحة السيارة:',
+                                carKms: 'قراءة عداد الكيلومترات:',
+                                employeeName: 'اسم الموظف:',
+                                employeeId: 'الرقم الوظيفي للموظف:'
+                            },
+                            placeholders: {
+                                contractNumber: 'رقم العقد',
+                                customerName: 'اسم العميل',
+                                carModel: 'نوع السيارة وطرازها',
+                                licensePlate: 'رقم لوحة السيارة',
+                                carKms: 'قراءة عداد الكيلومترات',
+                                employeeName: 'اسم الموظف',
+                                employeeId: 'الرقم الوظيفي للموظف'
+                            }
+                        },
+                        exterior: {
+                            title: '2. فحص الهيكل الخارجي',
+                            description: 'انقر على أي جزء في مخطط السيارة أدناه لتسجيل أي أضرار مثل الخدوش أو الضربات. سيظهر مؤشر أحمر على الأجزاء التي لديها ملاحظات مسجلة.',
+                            accidentLabel: 'حادث', // Added translation for accident label
+                            otherDamagesQuestion: 'هل توجد تلفيات لا تخص الحادث؟', // New translation
+                            otherDamagesStatus: 'تلفيات أخرى لا تخص الحادث: ' // New translation for summary
+                        },
+                        interior: {
+                            title: '3. فحص المقصورة والملحقات',
+                            description: 'تحقق من حالة المكونات الداخلية والملحقات الأساسية للسيارة. حدد حالة كل عنصر، وأضف ملاحظات إذا لزم الأمر.',
+                            statusOk: 'سليم',
+                            statusNote: 'ملاحظة',
+                            notePlaceholder: 'أضف ملاحظاتك هنا...'
+                        },
+                        media: {
+                            title: '4. الوسائط المرفقة (صور وفيديو)',
+                            description: 'يمكنك إرفاق صور وفيديوهات لتوثيق حالة السيارة. ',
+                            note: 'ملاحظة هامة: هذه الملفات لن يتم حفظها بشكل دائم في هذا التطبيق (الخالية من الخادم). لإنتاج نظام فعال، ستحتاج لربطه بحلول تخزين سحابي أو خادم خلفي.',
+                            labels: {
+                                photo: 'إرفاق صور (أو التقاط بالكاميرا)',
+                                video: 'إرفاق فيديو (أو التقاط بالكاميرا)'
+                            },
+                            videoPrefix: 'فيديو: '
+                        },
+                        summary: {
+                            title: '5. الملخص والتقرير',
+                            description: 'هنا يمكنك مراجعة جميع الملاحظات المسجلة والحصول على نظرة عامة على حالة السيارة. الرسم البياني يوضح توزيع أنواع الأضرار المسجلة.',
+                            notesListTitle: 'قائمة الملاحظات',
+                            noNotes: 'لم يتم تسجيل أي ملاحظات بعد.',
+                            damageDistributionTitle: 'توزيع الأضرار',
+                            ratingTitle: 'تقييم حالة السيارة العامة عند الاستلام',
+                            notRated: 'لم يتم التقييم بعد',
+                            ratingStars: ' نجوم',
+                            typePrefix: 'النوع: ',
+                            notesPrefix: 'ملاحظات: ',
+                            estimatedPricePrefix: 'السعر التقديري: ',
+                            accidentStatus: 'حالة الحادث: ' // Added translation for accident status
+                        },
+                        duration: {
+                            title: '6. مدة إعداد التقرير',
+                            description: 'يتتبع هذا المؤقت الوقت المستغرق في إعداد التقرير، ويتوقف عند طباعة التقرير.',
+                            finalDuration: 'المدة النهائية: '
+                        },
+                        aiSummary: {
+                            title: '7. ملخص التقرير بالذكاء الاصطناعي',
+                            description: 'احصل على ملخص احترافي لحالة السيارة بناءً على ملاحظاتك.',
+                            buttonText: '✨ توليد ملخص التقرير بالذكاء الاصطناعي',
+                            generating: 'جارٍ التوليد...',
+                            placeholder: 'سيظهر الملخص المولّد بالذكاء الاصطناعي هنا.',
+                            errorGeneric: 'حدث خطأ في توليد الملخص أو لم يتم العثور على محتوى. يرجى المحاولة مرة أخرى.',
+                            errorAPI: 'حدث خطأ أثناء التواصل مع الذكاء الاصطناعي: '
+                        },
+                        invoice: {
+                            title: '8. فاتورة الإصلاح التقديرية',
+                            description: 'ملخص تقديري لتكاليف الإصلاحات المحتملة مع احتساب ضريبة القيمة المضافة.',
+                            headers: {
+                                item: 'القطعة / البند',
+                                cost: 'التكلفة (ريال)'
+                            },
+                            labels: {
+                                subtotal: 'المجموع الفرعي:',
+                                vat: 'ضريبة القيمة المضافة (15%):',
+                                total: 'المجموع الكلي:'
+                            },
+                            noRepairCosts: 'لا توجد تكاليف إصلاح رقمية لتضمينها في الفاتورة.'
+                        }
+                    },
+                    modal: {
+                        damageTitle: 'تسجيل ضرر',
+                        damageTypeLabel: 'نوع الضرر',
+                        estimatedPriceLabel: 'السعر التقديري:',
+                        notesLabel: 'ملاحظات',
+                        notesPlaceholder: 'مثال: خدش بطول 5 سم أسفل المقبض',
+                        cancelButton: 'إلغاء',
+                        saveButton: 'حفظ',
+                        byAgreement: 'بالاتفاق',
+                        estimated: 'تقديري' // For scratch
+                    },
+                    damageOptions: {
+                        minorScratch: 'خدش بسيط',
+                        deepScratch: 'خدش عميق',
+                        dent: 'ضربة',
+                        crack: 'كسر',
+                        missing: 'مفقود',
+                        other: 'أخرى'
+                    },
+                    carParts: {
+                        roof: 'السقف',
+                        hood: 'غطاء المحرك',
+                        trunk: 'الصندوق الخلفي',
+                        frontRightDoor: 'الباب الأمامي الأيمن',
+                        backRightDoor: 'الباب الخلفي الأيمن',
+                        frontLeftDoor: 'الباب الأمامي الأيسر',
+                        backLeftDoor: 'الباب الخلفي الأيسر',
+                        frontBumper: 'المصد الأمامي',
+                        rearBumper: 'المصد الخلفي',
+                        windshield: 'زجاج أمامي',
+                        rearGlass: 'زجاج خلفي'
+                    },
+                    checklistItems: [
+                        { id: 'seats', name: 'المقاعد والفرش الداخلي' },
+                        { id: 'dashboard', name: 'لوحة القيادة' },
+                        { id: 'internal_screen', name: 'حالة الشاشة الداخلية' },
+                        { id: 'speedometer', name: 'حالة عداد السرعة' },
+                        { id: 'ac', name: 'التكييف' },
+                        { id: 'radio', name: 'الراديو / الصوت' },
+                        { id: 'key_condition', name: 'حالة المفتاح' },
+                        { id: 'wheels_condition', name: 'حالة العجلات والطاسات (جميعها)' }, // Consolidated item
+                        { id: 'spare_tire', name: 'إطار احتياطي' },
+                        { id: 'tools', name: 'عدة تغيير الإطار' },
+                        { id: 'reflective_triangle', name: 'توفر المثلث العاكس' },
+                        { id: 'fire_extinguisher', name: 'توفر طفاية الحريق' },
+                        { id: 'first_aid_kit', name: 'حقيبة الإسعافات الأولية' },
+                        { id: 'wiper_fluid', name: 'مياه المساحات' },
+                        { id: 'no_smoke_smell', name: 'عدم وجود رائحة دخان' },
+                        { id: 'fuel_level', name: 'مستوى الوقود الكافي' },
+                        { id: 'oil_change_date', name: 'موعد تغيير الزيت (ملاحظات)' },
+                        { id: 'license', name: 'رخصة السير' },
+                        { id: 'insurance', name: 'وثيقة التأمين' },
+                    ],
+                    buttons: {
+                        printReport: 'طباعة التقرير / حفظ PDF',
+                        generateInvoice: 'إنشاء فاتورة الإصلاح'
+                    },
+                    currency: {
+                        SAR: 'ريال'
+                    },
+                    defaultPartPrices: { // Default prices for certain parts from the provided image
+                        'roof': 300,
+                        'hood': 250,
+                        'trunk': 250,
+                        'front-right-door': 300,
+                        'back-right-door': 300,
+                        'front-left-door': 300,
+                        'back-left-door': 300,
+                        'front-bumper': 250,
+                        'rear-bumper': 250,
+                        'windshield': 250,
+                        'rear-glass': 'حسب نوع السيارة وسعر الوكاله', // "حسب نوع السيارة وسعر الوكاله" in AR
+                        'deepScratchPrice': 100 // Default price for deep scratch
+                    },
+                    priceTranslation: {
+                        'حسب نوع السيارة وسعر الوكاله': 'حسب نوع السيارة وسعر الوكاله'
+                    },
+                    modes: {
+                        pickup: 'استلام المركبة', // Updated text
+                        return: 'تسليم المركبة' // Updated text
+                    },
+                    general: { // New section for general terms
+                        yes: 'نعم',
+                        no: 'لا'
+                    },
+                    validation: {
+                        title: 'خطأ في التحقق',
+                        allNotesRequired: 'يرجى إكمال جميع الملاحظات المطلوبة.',
+                        exteriorNotesRequired: 'يرجى إضافة ملاحظات للأجزاء الخارجية التي تم تحديدها (غير الخدوش البسيطة).', 
+                        interiorNotesRequired: 'يرجى إضافة ملاحظات لعناصر الفحص الداخلي المحددة كملاحظة.',
+                        okButton: 'موافق'
+                    }
+                },
+                'en': {
+                    title: 'Interactive Vehicle Inspection Form',
+                    header: {
+                        title: 'Interactive Vehicle Inspection Form',
+                        description: 'A tool to accurately and transparently document vehicle condition upon pickup and return.'
+                    },
+                    sections: {
+                        basicInfo: {
+                            title: '1. Basic Information',
+                            description: 'Start by entering contract, customer, and vehicle information, along with employee details. This data is essential for accurate documentation and linking to the correct customer and employee.',
+                            labels: {
+                                contractNumber: 'Contract Number:',
+                                customerName: 'Customer Name:',
+                                carModel: 'Car Type & Model:',
+                                licensePlate: 'License Plate Number:',
+                                carKms: 'Kilometer Reading:',
+                                employeeName: 'Employee Name:',
+                                employeeId: 'Employee ID:'
+                            },
+                            placeholders: {
+                                contractNumber: 'Contract Number',
+                                customerName: 'Customer Name',
+                                carModel: 'Car Type & Model',
+                                licensePlate: 'License Plate Number',
+                                carKms: 'Kilometer Reading',
+                                employeeName: 'Employee Name',
+                                employeeId: 'Employee ID'
+                            }
+                        },
+                        exterior: {
+                            title: '2. Exterior Inspection',
+                            description: 'Click on any part of the car diagram below to log damages such as scratches or dents. A red indicator will appear on parts with recorded notes.',
+                            accidentLabel: 'Accident', // Added translation for accident label
+                            otherDamagesQuestion: 'Are there other damages not related to the accident?', // New translation
+                            otherDamagesStatus: 'Other damages (not accident related): ' // New translation for summary
+                        },
+                        interior: {
+                            title: '3. Interior & Accessories Inspection',
+                            description: 'Check the condition of the interior components and essential vehicle accessories. Specify the status of each item, and add notes if necessary.',
+                            statusOk: 'OK',
+                            statusNote: 'Note',
+                            notePlaceholder: 'Add your notes here...'
+                        },
+                        media: {
+                            title: '4. Attached Media (Photos & Videos)',
+                            description: 'You can attach photos and videos to document the vehicle\'s condition. ',
+                            note: 'Important Note: These files will not be permanently saved in this client-side application. For a functional system, you will need to integrate with cloud storage or a backend server.',
+                            labels: {
+                                photo: 'Attach Photos (or capture with camera)',
+                                video: 'Attach Video (or capture with camcorder)'
+                            },
+                            videoPrefix: 'Video: '
+                        },
+                        summary: {
+                            title: '5. Summary and Report',
+                            description: 'Here you can review all recorded notes and get an overview of the vehicle\'s condition. The chart shows the distribution of recorded damages.',
+                            notesListTitle: 'Notes List',
+                            noNotes: 'No notes recorded yet.',
+                            damageDistributionTitle: 'Damage Distribution',
+                            ratingTitle: 'Overall Vehicle Condition Rating upon Pickup',
+                            notRated: 'Not rated yet',
+                            ratingStars: ' stars',
+                            typePrefix: 'Type: ',
+                            notesPrefix: 'Notes: ',
+                            estimatedPricePrefix: 'Estimated Price: ',
+                            accidentStatus: 'Accident Status: ' // Added translation for accident status
+                        },
+                        duration: {
+                            title: '6. Report Preparation Duration',
+                            description: 'This timer tracks the time taken to prepare the report, and stops when the report is printed.',
+                            finalDuration: 'Final Duration: '
+                        },
+                        aiSummary: {
+                            title: '7. AI-Generated Report Summary',
+                            description: 'Get a professional summary of the vehicle\'s condition based on your observations.',
+                            buttonText: '✨ Generate AI Report Summary',
+                            generating: 'Generating...',
+                            placeholder: 'AI-generated summary will appear here.',
+                            errorGeneric: 'Error generating summary or no content found. Please try again.',
+                            errorAPI: 'Error communicating with AI: '
+                        },
+                        invoice: {
+                            title: '8. Estimated Repair Invoice',
+                            description: 'An estimated summary of potential repair costs including VAT.',
+                            headers: {
+                                item: 'Item / Part',
+                                cost: 'Cost (SAR)'
+                            },
+                            labels: {
+                                subtotal: 'Subtotal:',
+                                vat: 'VAT (15%):',
+                                total: 'Grand Total:'
+                            },
+                            noRepairCosts: 'No numerical repair costs to include in the invoice.'
+                        }
+                    },
+                    modal: {
+                        damageTitle: 'Log Damage',
+                        estimatedPriceLabel: 'Estimated Price:',
+                        notesLabel: 'Notes',
+                        notesPlaceholder: 'Example: 5cm scratch below the handle',
+                        cancelButton: 'Cancel',
+                        saveButton: 'Save',
+                        byAgreement: 'By Agreement',
+                        estimated: 'Estimated' // For scratch
+                    },
+                    damageOptions: {
+                        minorScratch: 'Minor Scratch',
+                        deepScratch: 'Deep Scratch',
+                        dent: 'Dent',
+                        crack: 'Crack',
+                        missing: 'Missing',
+                        other: 'Other'
+                    },
+                     carParts: {
+                        roof: 'Roof',
+                        hood: 'Hood',
+                        trunk: 'Trunk',
+                        frontRightDoor: 'Front Right Door',
+                        backRightDoor: 'Back Right Door',
+                        frontLeftDoor: 'Front Left Door',
+                        backLeftDoor: 'Back Left Door',
+                        frontBumper: 'Front Bumper',
+                        rearBumper: 'Rear Bumper',
+                        windshield: 'Windshield',
+                        rearGlass: 'Rear Glass'
+                    },
+                    checklistItems: [
+                        { id: 'seats', name: 'Seats & Interior Upholstery' },
+                        { id: 'dashboard', name: 'Dashboard' },
+                        { id: 'internal_screen', name: 'Internal Screen Condition' },
+                        { id: 'speedometer', name: 'Speedometer Condition' },
+                        { id: 'ac', name: 'Air Conditioning' },
+                        { id: 'radio', name: 'Radio / Sound System' },
+                        { id: 'key_condition', name: 'Key Condition' },
+                        { id: 'wheels_condition', name: 'Wheels & Hubcaps Condition (All)' }, // Consolidated item
+                        { id: 'spare_tire', name: 'Spare Tire' },
+                        { id: 'tools', name: 'Tire Change Tools' },
+                        { id: 'reflective_triangle', name: 'Reflective Triangle Availability' },
+                        { id: 'fire_extinguisher', name: 'Fire Extinguisher Availability' },
+                        { id: 'first_aid_kit', name: 'First Aid Kit Condition' },
+                        { id: 'wiper_fluid', name: 'Wiper Fluid' },
+                        { id: 'no_smoke_smell', name: 'No Smoke Smell' },
+                        { id: 'fuel_level', name: 'Sufficient Fuel Level' },
+                        { id: 'oil_change_date', name: 'Oil Change Date (Notes)' },
+                        { id: 'license', name: 'Vehicle License' },
+                        { id: 'insurance', name: 'Insurance Document' },
+                    ],
+                    buttons: {
+                        printReport: 'Print Report / Save PDF',
+                        generateInvoice: 'Generate Repair Invoice'
+                    },
+                    currency: {
+                        SAR: 'SAR'
+                    },
+                    defaultPartPrices: { // Default prices for certain parts from the provided image
+                        'roof': 300,
+                        'hood': 250,
+                        'trunk': 250,
+                        'front-right-door': 300,
+                        'back-right-door': 300,
+                        'front-left-door': 300,
+                        'back-left-door': 300,
+                        'front-bumper': 250,
+                        'rear-bumper': 250,
+                        'windshield': 250,
+                        'rear-glass': 'byVehicleType', // "حسب نوع السيارة وسعر الوكاله" in AR
+                        'deepScratchPrice': 100 // Default price for deep scratch
+                    },
+                    priceTranslation: {
+                        'حسب نوع السيارة وسعر الوكاله': 'Based on vehicle type and agency price'
+                    },
+                    modes: {
+                        pickup: 'Pickup Mode', // Updated text
+                        return: 'Return Mode' // Updated text
+                    },
+                    general: { // New section for general terms
+                        yes: 'Yes',
+                        no: 'No'
+                    },
+                    validation: {
+                        title: 'Validation Error',
+                        allNotesRequired: 'Please complete all required notes.',
+                        exteriorNotesRequired: 'Please add notes for the identified exterior parts (excluding minor scratches).', 
+                        interiorNotesRequired: 'Please add notes for interior checklist items marked as "Note".',
+                        okButton: 'OK'
+                    }
+                }
+            };
+
+            const inspectionData = {
+                basicInfo: {
+                    contractNumber: '',
+                    customerName: '',
+                    carModel: '',
+                    licensePlate: '',
+                    carKms: '',
+                    carConditionRating: 0,
+                    employeeName: '',
+                    employeeId: ''
+                },
+                exterior: {
+                    accident: false, // Added accident property
+                    otherDamages: true // New property: true by default to show car diagram
+                },
+                interior: {},
+                media: {
+                    photos: [],
+                    videos: []
+                }
+            };
+
+            const partNamesMapping = { // Maps IDs to language-agnostic keys
+                'roof': 'roof', 'hood': 'hood', 'trunk': 'trunk',
+                'front-right-door': 'frontRightDoor', 'back-right-door': 'backRightDoor',
+                'front-left-door': 'frontLeftDoor', 'back-left-door': 'backLeftDoor',
+                'front-bumper': 'frontBumper', 'rear-bumper': 'rearBumper',
+                'windshield': 'windshield', 'rear-glass': 'rearGlass'
+            };
+
+            // Restore all original checklist items
+            const checklistItemsData = [
+                { id: 'seats', name: 'المقاعد والفرش الداخلي' },
+                { id: 'dashboard', name: 'لوحة القيادة' },
+                { id: 'internal_screen', name: 'حالة الشاشة الداخلية' },
+                { id: 'speedometer', name: 'حالة عداد السرعة' },
+                { id: 'ac', name: 'التكييف' },
+                { id: 'radio', name: 'الراديو / الصوت' },
+                { id: 'key_condition', name: 'حالة المفتاح' },
+                { id: 'wheels_condition', name: 'حالة العجلات والطاسات (جميعها)' }, // Consolidated item
+                { id: 'spare_tire', name: 'إطار احتياطي' },
+                { id: 'tools', name: 'عدة تغيير الإطار' },
+                { id: 'reflective_triangle', name: 'توفر المثلث العاكس' },
+                { id: 'fire_extinguisher', name: 'توفر طفاية الحريق' },
+                { id: 'first_aid_kit', name: 'حقيبة الإسعافات الأولية' },
+                { id: 'wiper_fluid', name: 'مياه المساحات' },
+                { id: 'no_smoke_smell', name: 'عدم وجود رائحة دخان' },
+                { id: 'fuel_level', name: 'مستوى الوقود الكافي' },
+                { id: 'oil_change_date', name: 'موعد تغيير الزيت (ملاحظات)' },
+                { id: 'license', name: 'رخصة السير' },
+                { id: 'insurance', name: 'وثيقة التأمين' },
+            ]; 
+
+            const modal = document.getElementById('damage-modal');
+            const damageForm = document.getElementById('damage-form');
+            const carParts = document.querySelectorAll('.car-part');
+            const checklistContainer = document.getElementById('checklist-container');
+            const damageSummaryList = document.getElementById('damage-summary-list');
+            const photoUpload = document.getElementById('photo-upload');
+            const photoPreviews = document.getElementById('photo-previews');
+            const videoUpload = document.getElementById('video-upload');
+            const videoFileList = document.getElementById('video-file-list');
+            const carConditionRatingStars = document.getElementById('car-condition-rating-stars');
+            const selectedRatingText = document.getElementById('selected-rating-text');
+            const reportTimerElem = document.getElementById('report-timer');
+            const finalDurationTextElem = document.getElementById('final-duration-text');
+            const finalDurationValueElem = document.getElementById('final-duration-value'); 
+            const printReportButton = document.getElementById('print-report-button');
+            const generateAiSummaryButton = document.getElementById('generate-ai-summary-button');
+            const aiButtonText = document.getElementById('ai-button-text');
+            const aiLoadingSpinner = document.getElementById('ai-loading-spinner');
+            const aiSummaryOutput = document.getElementById('ai-summary-output');
+            const langArButton = document.getElementById('lang-ar');
+            const langEnButton = document.getElementById('lang-en');
+            const damageTypeSelect = document.getElementById('damage-type');
+            const estimatedPriceDisplay = document.getElementById('estimated-price-display');
+            const modePickupButton = document.getElementById('mode-pickup');
+            const modeReturnButton = document.getElementById('mode-return');
+            const invoiceSection = document.getElementById('invoice-section');
+            const invoiceItemsBody = document.getElementById('invoice-items-body');
+            const invoiceSubtotalElem = document.getElementById('invoice-subtotal');
+            const invoiceVatElem = document.getElementById('invoice-vat');
+            const invoiceTotalElem = document.getElementById('invoice-total');
+            const generateInvoiceButton = document.getElementById('generate-invoice-button');
+            const noRepairCostsMessage = document.getElementById('no-repair-costs-message');
+            const accidentCheckbox = document.getElementById('accident-checkbox'); // Get the new checkbox
+            const otherDamagesYesRadio = document.getElementById('other-damages-yes'); // New radio button
+            const otherDamagesNoRadio = document.getElementById('other-damages-no'); // New radio button
+            const carDiagramContainer = document.getElementById('car-diagram-container'); // Container for car diagram
+
+            // Elements for generic message modal
+            const messageModal = document.getElementById('message-modal');
+            const messageModalTitle = document.getElementById('message-modal-title');
+            const messageModalContent = document.getElementById('message-modal-content');
+            const messageModalOkButton = document.getElementById('message-modal-ok-button');
+
+
+            let timerStartTime;
+            let timerIntervalId;
+            let currentMode = 'pickup'; // Default mode
+
+            // Language switching function
+            function setLanguage(lang) {
+                currentLanguage = lang;
+                document.documentElement.lang = lang;
+                document.documentElement.dir = (lang === 'ar') ? 'rtl' : 'ltr';
+
+                // Update static text elements
+                document.querySelectorAll('[data-lang-key]').forEach(element => {
+                    const key = element.dataset.langKey;
+                    const text = getTranslation(key);
+                    if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+                        element.placeholder = text;
+                    } else if (element.tagName === 'OPTION') {
+                        // For options in select, if they have data-lang-key, update
+                        if (element.dataset.langKey) {
+                            element.textContent = getTranslation(element.dataset.langKey);
+                        }
+                    }
+                    else {
+                        element.textContent = text;
+                    }
+                });
+
+                // Update car part names
+                carParts.forEach(part => {
+                    const key = partNamesMapping[part.id];
+                    part.textContent = translations[currentLanguage].carParts[key];
+                });
+
+                // Re-create checklist items to apply new language
+                checklistContainer.innerHTML = ''; // Clear existing items before re-adding
+                checklistItemsData.forEach(item => createChecklistItem(item));
+
+                // Update modal title and options
+                const modalTitle = document.getElementById('modal-title');
+                if (modalTitle) modalTitle.textContent = getTranslation('modal.damageTitle');
+                const damageTypeLabel = document.querySelector('label[for="damage-type"]');
+                if (damageTypeLabel) damageTypeLabel.textContent = getTranslation('modal.damageTypeLabel');
+                const notesLabel = document.querySelector('label[for="damage-notes"]');
+                if (notesLabel) notesLabel.textContent = getTranslation('modal.notesLabel');
+                const notesPlaceholder = document.getElementById('damage-notes');
+                if (notesPlaceholder) notesPlaceholder.placeholder = getTranslation('modal.notesPlaceholder');
+                const cancelButton = document.getElementById('cancel-damage');
+                if (cancelButton) cancelButton.textContent = getTranslation('modal.cancelButton');
+                const saveButton = document.getElementById('save-damage');
+                if (saveButton) saveButton.textContent = getTranslation('modal.saveButton');
+                
+                // Update damage type options in modal
+                const damageTypeSelect = document.getElementById('damage-type');
+                if (damageTypeSelect) {
+                    // Update content of existing options based on data-lang-key
+                    damageTypeSelect.querySelectorAll('option[data-lang-key]').forEach(option => {
+                        option.textContent = getTranslation(option.dataset.langKey);
+                    });
+                }
+                
+                // Update summary texts
+                updateSummary();
+                updateChart();
+                updateStarRatingDisplay(inspectionData.basicInfo.carConditionRating);
+                // Update invoice texts if visible
+                if (invoiceSection.style.display !== 'none') {
+                    generateInvoice();
+                }
+
+                // Update print field labels
+                document.querySelectorAll('.input-field-print').forEach(label => {
+                    const key = label.dataset.langKey;
+                    if (key) {
+                        label.innerHTML = getTranslation(key) + ' <span id="' + label.id.replace('print-', 'print-') + '"></span>';
+                    }
+                });
+
+                // Re-populate basic info print fields
+                for (const id in basicInfoInputs) {
+                    const printElement = document.getElementById(`print-${id}`);
+                    if (printElement) {
+                        printElement.textContent = document.getElementById(id).value;
+                    }
+                }
+            }
+
+            function getTranslation(key) {
+                const keys = key.split('.');
+                let result = translations[currentLanguage];
+                for (const k of keys) {
+                    if (result && result.hasOwnProperty(k)) {
+                        result = result[k];
+                    } else {
+                        // Handle specific cases where AR and EN data structures differ for price
+                        if (key === 'modal.byAgreement') { // This is now a direct key in modal
+                            return (currentLanguage === 'ar' ? 'بالاتفاق' : 'By Agreement');
+                        }
+                        if (key === 'currency.SAR') {
+                            return (currentLanguage === 'ar' ? 'ريال' : 'SAR');
+                        }
+                        if (key === 'defaultPartPrices.byVehicleType') {
+                             return (currentLanguage === 'ar' ? 'حسب نوع السيارة وسعر الوكاله' : 'Based on vehicle type and agency price');
+                        }
+                        console.warn(`Translation key not found: ${key} for language ${currentLanguage}`);
+                        return `[Missing Translation: ${key}]`;
+                    }
+                }
+                return result;
+            }
+
+            langArButton.addEventListener('click', () => setLanguage('ar'));
+            langEnButton.addEventListener('click', () => setLanguage('en'));
+
+            // Mode selection functions
+            function setApplicationMode(mode) {
+                currentMode = mode;
+                // Update button styles
+                if (mode === 'pickup') {
+                    modePickupButton.classList.add('bg-[#FA4616]', 'text-white');
+                    modePickupButton.classList.remove('bg-slate-200', 'text-slate-800');
+                    modeReturnButton.classList.remove('bg-[#BB16A3]', 'text-white'); // Remove specific color
+                    modeReturnButton.classList.add('bg-slate-200', 'text-slate-800');
+                    document.body.classList.remove('mode-return'); // Remove class to show prices
+                    generateInvoiceButton.style.display = 'inline-flex'; // Show invoice button in pickup mode
+                } else { // mode === 'return'
+                    modeReturnButton.classList.add('bg-[#BB16A3]', 'text-white'); // Apply new color for active return mode
+                    modeReturnButton.classList.remove('bg-slate-200', 'text-slate-800');
+                    modePickupButton.classList.remove('bg-[#FA4616]', 'text-white');
+                    modePickupButton.classList.add('bg-slate-200', 'text-slate-800');
+                    document.body.classList.add('mode-return'); // Add class to hide prices
+                    generateInvoiceButton.style.display = 'none'; // Hide invoice button in return mode
+                    invoiceSection.style.display = 'none'; // Hide invoice section in return mode
+                }
+                // Re-render sections that depend on mode (summary, modal if open)
+                updateSummary(); // Re-render summary list to show/hide prices
+                if (!modal.classList.contains('hidden')) { // If modal is open, update its content
+                    updateModalPriceVisibility();
+                }
+            }
+
+            modePickupButton.addEventListener('click', () => setApplicationMode('pickup'));
+            modeReturnButton.addEventListener('click', () => setApplicationMode('return'));
+
+            // New function to handle modal price visibility
+            function updateModalPriceVisibility() {
+                const estimatedPriceLabel = document.querySelector('[data-lang-key="modal.estimatedPriceLabel"]');
+                const estimatedPriceDisplayElem = document.getElementById('estimated-price-display');
+                
+                if (currentMode === 'return') {
+                    if (estimatedPriceLabel) estimatedPriceLabel.classList.add('hidden');
+                    if (estimatedPriceDisplayElem) estimatedPriceDisplayElem.classList.add('hidden');
+                } else {
+                    if (estimatedPriceLabel) estimatedPriceLabel.classList.remove('hidden');
+                    if (estimatedPriceDisplayElem) estimatedPriceDisplayElem.classList.remove('hidden');
+                }
+            }
+
+
+            // Basic Info inputs
+            const basicInfoInputs = {
+                'contract-number': 'contractNumber',
+                'customer-name': 'customerName',
+                'car-model': 'carModel',
+                'license-plate': 'licensePlate',
+                'car-kms': 'carKms',
+                'employee-name': 'employeeName',
+                'employee-id': 'employeeId'
+            };
+
+            for (const id in basicInfoInputs) {
+                const inputElement = document.getElementById(id);
+                const dataKey = basicInfoInputs[id];
+                inputElement.addEventListener('input', (e) => {
+                    inspectionData.basicInfo[dataKey] = e.target.value;
+                    // Update print-only display fields
+                    const printElement = document.getElementById(`print-${id}`);
+                    if (printElement) {
+                        printElement.textContent = e.target.value;
+                    }
+                });
+            }
+
+            // Chart.js setup
+            const ctx = document.getElementById('damage-chart').getContext('2d');
+            const damageChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: '', // Label will be set dynamically
+                        data: [],
+                        backgroundColor: [
+                            '#80276C', '#A51890', '#BB16A3', '#FA4616', '#FFA300', '#d1d5db' /* Fallback grey */
+                        ],
+                        borderColor: '#ffffff',
+                        borderWidth: 3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                font: {
+                                    family: "'Almarai', sans-serif",
+                                    size: 14,
+                                }
+                            }
+                        },
+                        tooltip: {
+                            rtl: true,
+                            bodyFont: {
+                                family: "'Almarai', sans-serif",
+                            },
+                             titleFont: {
+                                family: "'Almarai', sans-serif",
+                            }
+                        }
+                    }
+                }
+            });
+
+            const openModal = (partId) => {
+                document.getElementById('modal-title').innerText = `${getTranslation('modal.damageTitle')} لـ: ${translations[currentLanguage].carParts[partNamesMapping[partId]]}`;
+                document.getElementById('part-id').value = partId;
+                damageForm.reset();
+                estimatedPriceDisplay.textContent = '--'; // Reset price display
+                
+                // Retrieve stored data for this part
+                const storedPartData = inspectionData.exterior[partId];
+
+                if (storedPartData) {
+                    // Find the current language's value for the stored Arabic damage type
+                    const damageKey = Object.keys(translations.ar.damageOptions).find(key => translations.ar.damageOptions[key] === storedPartData.type);
+                    document.getElementById('damage-type').value = translations[currentLanguage].damageOptions[damageKey];
+                    
+                    // Set estimated price based on stored data
+                    if (storedPartData.estimatedPrice !== null && storedPartData.estimatedPrice !== undefined) {
+                        if (typeof storedPartData.estimatedPrice === 'string' && (storedPartData.estimatedPrice === 'بالاتفاق' || storedPartData.estimatedPrice === 'حسب نوع السيارة وسعر الوكاله' || storedPartData.estimatedPrice === 'تقديري')) {
+                            estimatedPriceDisplay.textContent = getTranslation(
+                                storedPartData.estimatedPrice === 'بالاتفاق' ? 'modal.byAgreement' :
+                                storedPartData.estimatedPrice === 'حسب نوع السيارة وسعر الوكاله' ? 'defaultPartPrices.byVehicleType' :
+                                'modal.estimated'
+                            );
+                        }
+                        else {
+                            estimatedPriceDisplay.textContent = `${storedPartData.estimatedPrice} ${getTranslation('currency.SAR')}`;
+                        }
+                    } else {
+                        estimatedPriceDisplay.textContent = '--';
+                    }
+                    
+                    document.getElementById('damage-notes').value = storedPartData.notes;
+                } else {
+                    // Default to minor scratch initially when opening for a new part
+                    document.getElementById('damage-type').value = getTranslation('damageOptions.minorScratch');
+                    updateEstimatedPrice(partId, document.getElementById('damage-type').value);
+                }
+                updateModalPriceVisibility(); // Apply visibility based on current mode
+                modal.classList.remove('hidden');
+                setTimeout(() => {
+                    modal.classList.remove('opacity-0');
+                    modal.querySelector('div').classList.remove('scale-95');
+                }, 10);
+            };
+            
+            const closeModal = () => {
+                modal.classList.add('opacity-0');
+                modal.querySelector('div').classList.add('scale-95');
+                setTimeout(() => modal.classList.add('hidden'), 300);
+            };
+
+            const updateSummary = () => {
+                damageSummaryList.innerHTML = '';
+                let hasDamage = false;
+
+                // Add accident status to the summary
+                const accidentStatus = inspectionData.exterior.accident ? getTranslation('general.yes') : getTranslation('general.no');
+                const accidentLi = document.createElement('div');
+                accidentLi.className = 'p-3 bg-white rounded-lg border border-slate-200';
+                accidentLi.innerHTML = `<p class="font-bold text-slate-800">${getTranslation('sections.exterior.accidentLabel')}: <span class="font-normal ${inspectionData.exterior.accident ? 'text-[#FA4616]' : 'text-green-600'}">${accidentStatus}</span></p>`;
+                damageSummaryList.appendChild(accidentLi);
+                if (inspectionData.exterior.accident) hasDamage = true;
+
+                // Add other damages status to the summary
+                const otherDamagesStatus = inspectionData.exterior.otherDamages ? getTranslation('general.yes') : getTranslation('general.no');
+                const otherDamagesLi = document.createElement('div');
+                otherDamagesLi.className = 'p-3 bg-white rounded-lg border border-slate-200';
+                otherDamagesLi.innerHTML = `<p class="font-bold text-slate-800">${getTranslation('sections.exterior.otherDamagesQuestion')}: <span class="font-normal ${inspectionData.exterior.otherDamages ? 'text-green-600' : 'text-red-600'}">${otherDamagesStatus}</span></p>`;
+                damageSummaryList.appendChild(otherDamagesLi);
+                if (inspectionData.exterior.otherDamages) hasDamage = true;
+
+
+                const allDamages = [
+                    // Filter out accident and otherDamages properties from exterior object when iterating through parts
+                    ...Object.entries(inspectionData.exterior).filter(([key,]) => key !== 'accident' && key !== 'otherDamages'), 
+                    ...Object.entries(inspectionData.interior)
+                ];
+
+                if (inspectionData.exterior.otherDamages && allDamages.length > 0) { // Only add individual damages if otherDamages is true
+                    allDamages.forEach(([id, data]) => {
+                        if (data.notes || (data.estimatedPrice !== null && data.estimatedPrice !== undefined)) { // Check if there's any data for the item (notes OR price)
+                            hasDamage = true;
+                            const li = document.createElement('div');
+                            li.className = 'p-3 bg-white rounded-lg border border-slate-200';
+                            
+                            // Get item name based on current language
+                            let partNameTranslated = '';
+                            if (partNamesMapping[id]) { // It's a car part
+                                partNameTranslated = translations[currentLanguage].carParts[partNamesMapping[id]];
+                            } else { // It's a checklist item
+                                partNameTranslated = translations[currentLanguage].checklistItems.find(item => item.id === id)?.name || id;
+                            }
+                            
+                            // Get damage type translated (if available)
+                            const damageTypeTranslated = data.type ? (translations[currentLanguage].damageOptions[Object.keys(translations.ar.damageOptions).find(key => translations.ar.damageOptions[key] === data.type)] || data.type) : '';
+
+                            let priceInfoHtml = '';
+                            // Conditionally show price info in summary based on currentMode
+                            if (currentMode === 'pickup' && data.estimatedPrice !== null && data.estimatedPrice !== undefined) {
+                                let displayPrice = data.estimatedPrice;
+                                if (displayPrice === 'بالاتفاق') {
+                                    displayPrice = getTranslation('modal.byAgreement');
+                                } else if (displayPrice === 'حسب نوع السيارة وسعر الوكاله') {
+                                    displayPrice = getTranslation('defaultPartPrices.byVehicleType');
+                                } else if (displayPrice === 'تقديري') {
+                                     displayPrice = getTranslation('modal.estimated');
+                                }
+                                else {
+                                    displayPrice = `${data.estimatedPrice} ${getTranslation('currency.SAR')}`;
+                                }
+                                priceInfoHtml = `<p class="text-sm text-slate-600 mt-1 price-info-summary">${getTranslation('sections.summary.estimatedPricePrefix')}${displayPrice}</p>`;
+                            }
+
+
+                            // Construct main text for the list item
+                            let mainText = `<p class="font-bold text-slate-800">${partNameTranslated}: `;
+                            if (damageTypeTranslated) {
+                                mainText += `<span class="font-normal text-[#80276C]">${getTranslation('sections.summary.typePrefix')}${damageTypeTranslated}</span>`;
+                            }
+                            mainText += `</p>`;
+
+                            let notesText = '';
+                            if (data.notes) {
+                                notesText = `<p class="text-sm text-slate-600 mt-1">${getTranslation('sections.summary.notesPrefix')}${data.notes}</p>`;
+                            }
+
+                            li.innerHTML = mainText + notesText + priceInfoHtml;
+                            damageSummaryList.appendChild(li);
+                        }
+                    });
+                }
+                
+                if (!hasDamage && !inspectionData.exterior.accident && !inspectionData.exterior.otherDamages) { // Show no notes message only if truly empty
+                    damageSummaryList.innerHTML = `<p class="text-slate-500" data-lang-key="sections.summary.noNotes">${getTranslation('sections.summary.noNotes')}</p>`;
+                }
+            };
+
+            const updateChart = () => {
+                const damageCounts = {};
+                // Only count individual exterior damages if otherDamages is true
+                const individualExteriorDamages = inspectionData.exterior.otherDamages ? 
+                    Object.values(inspectionData.exterior).filter(item => item !== inspectionData.exterior.accident && item !== inspectionData.exterior.otherDamages) : [];
+
+                const allDamages = [
+                    ...individualExteriorDamages,
+                    ...Object.values(inspectionData.interior)
+                ];
+
+                allDamages.forEach(damage => {
+                    if (damage.notes || (damage.estimatedPrice !== null && damage.estimatedPrice !== undefined && damage.estimatedPrice !== 'تقديري')) { // Only count items with notes or a non-estimated price for the chart
+                        const originalDamageType = damage.type; // e.g., "خدش بسيط" or "Minor Scratch"
+                        // Find the language-agnostic key for the damage type
+                        const damageKey = Object.keys(translations.ar.damageOptions).find(key => translations.ar.damageOptions[key] === originalDamageType);
+                        
+                        // Use the translated name for the current language in the chart label
+                        const translatedDamageType = translations[currentLanguage].damageOptions[damageKey] || originalDamageType;
+
+                        damageCounts[translatedDamageType] = (damageCounts[translatedDamageType] || 0) + 1;
+                    }
+                });
+
+                // Add "Accident" to chart if marked
+                if (inspectionData.exterior.accident) {
+                    damageCounts[getTranslation('sections.exterior.accidentLabel')] = (damageCounts[getTranslation('sections.exterior.accidentLabel')] || 0) + 1;
+                }
+
+                // Add "Other Damages No" to chart if otherDamages is false
+                if (!inspectionData.exterior.otherDamages) {
+                    damageCounts[getTranslation('sections.exterior.otherDamagesQuestion')] = (damageCounts[getTranslation('sections.exterior.otherDamagesQuestion')] || 0) + 1;
+                }
+
+                damageChart.data.labels = Object.keys(damageCounts);
+                damageChart.data.datasets[0].data = Object.values(damageCounts);
+                damageChart.data.datasets[0].label = getTranslation('sections.summary.damageDistributionTitle'); // Update chart label
+                damageChart.update();
+            };
+
+            carParts.forEach(part => {
+                part.addEventListener('click', () => openModal(part.id));
+            });
+            
+            document.getElementById('cancel-damage').addEventListener('click', closeModal);
+
+            damageForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const partId = document.getElementById('part-id').value;
+                const type = damageTypeSelect.value; // This is the currently displayed language value
+                const notes = document.getElementById('damage-notes').value.trim();
+                
+                // Store the original Arabic value for damage type
+                const selectedDamageOption = damageTypeSelect.options[damageTypeSelect.selectedIndex];
+                const originalDamageValue = translations.ar.damageOptions[selectedDamageOption.dataset.langKey];
+
+                // Get the current estimated price displayed
+                let priceToStore = null;
+                const currentPriceText = estimatedPriceDisplay.textContent;
+
+                if (currentPriceText.includes(getTranslation('currency.SAR'))) {
+                    priceToStore = parseFloat(currentPriceText.replace(new RegExp(` ${getTranslation('currency.SAR')}$`), '').trim());
+                } else if (currentPriceText === getTranslation('modal.byAgreement')) {
+                    priceToStore = 'بالاتفاق';
+                } else if (currentPriceText === getTranslation('defaultPartPrices.byVehicleType')) {
+                     priceToStore = 'حسب نوع السيارة وسعر الوكاله';
+                } else if (currentPriceText === getTranslation('modal.estimated')) {
+                    priceToStore = 'تقديري';
+                }
+
+
+                if (notes || (priceToStore !== null && priceToStore !== undefined && priceToStore !== 'تقديري')) { // Save if there are notes OR a concrete estimated price is set
+                    inspectionData.exterior[partId] = { type: originalDamageValue, notes, estimatedPrice: priceToStore };
+                    const partElement = document.getElementById(partId);
+                    if (!partElement.querySelector('.has-damage-indicator')) {
+                        const indicator = document.createElement('div');
+                        indicator.className = 'has-damage-indicator';
+                        partElement.appendChild(indicator);
+                    }
+                } else { // If no notes and no estimated price, remove the entry
+                    delete inspectionData.exterior[partId];
+                    const indicator = document.getElementById(partId).querySelector('.has-damage-indicator');
+                    if(indicator) indicator.remove();
+                }
+                
+                updateSummary();
+                updateChart();
+                closeModal();
+            });
+
+            // Function to update default estimated price based on part and damage type
+            function updateEstimatedPrice(partId, damageTypeTranslated) {
+                const damageKey = Object.keys(translations.ar.damageOptions).find(key => translations.ar.damageOptions[key] === damageTypeTranslated || translations.en.damageOptions[key] === damageTypeTranslated);
+                
+                const partDefaultPriceValue = translations.ar.defaultPartPrices[partNamesMapping[partId]];
+
+                if (damageKey === 'minorScratch') {
+                    estimatedPriceDisplay.textContent = getTranslation('modal.estimated'); // "تقديري" or "Estimated"
+                    return;
+                }
+                
+                // Specific price for Deep Scratch
+                if (damageKey === 'deepScratch') {
+                    estimatedPriceDisplay.textContent = `${translations.ar.defaultPartPrices.deepScratchPrice} ${getTranslation('currency.SAR')}`;
+                    return;
+                }
+
+                // Handle other damage types
+                if (partDefaultPriceValue !== undefined) { // Check for undefined to allow 0 or null if needed
+                    if (typeof partDefaultPriceValue === 'number' || !isNaN(parseFloat(partDefaultPriceValue))) {
+                         estimatedPriceDisplay.textContent = `${partDefaultPriceValue} ${getTranslation('currency.SAR')}`;
+                    } else if (partDefaultPriceValue === 'حسب نوع السيارة وسعر الوكاله') {
+                        estimatedPriceDisplay.textContent = getTranslation('defaultPartPrices.byVehicleType');
+                    } else if (partDefaultPriceValue === 'بالاتفاق') {
+                         estimatedPriceDisplay.textContent = getTranslation('modal.byAgreement');
+                    }
+                    else {
+                        estimatedPriceDisplay.textContent = '--';
+                    }
+                } else {
+                    estimatedPriceDisplay.textContent = '--';
+                }
+            }
+
+
+            // Listen for changes in damage type to update estimated price
+            damageTypeSelect.addEventListener('change', (e) => {
+                const partId = document.getElementById('part-id').value;
+                updateEstimatedPrice(partId, e.target.value);
+            });
+            
+            const createChecklistItem = (item) => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'flex items-center justify-between bg-slate-100 p-3 rounded-lg';
+                
+                itemDiv.innerHTML = `
+                    <p class="font-medium text-slate-800">${translations[currentLanguage].checklistItems.find(i => i.id === item.id)?.name || item.name}</p>
+                    <div class="flex gap-2 print-hidden">
+                        <button data-id="${item.id}" data-status="ok" class="status-btn bg-green-200 text-green-800 px-4 py-1 rounded-md text-sm">${getTranslation('sections.interior.statusOk')}</button>
+                        <button data-id="${item.id}" data-status="note" class="status-btn bg-slate-200 text-slate-800 px-4 py-1 rounded-md text-sm">${getTranslation('sections.interior.statusNote')}</button>
+                    </div>
+                    <div class="checklist-item-print print-only">
+                        <span class="status-print" id="print-status-${item.id}"></span>
+                        <span class="note-print" id="print-note-${item.id}"></span>
+                    </div>
+                `;
+
+                const noteDiv = document.createElement('div');
+                noteDiv.className = 'mt-2 hidden';
+                noteDiv.innerHTML = `
+                    <textarea data-id="${item.id}" rows="2" placeholder="${getTranslation('sections.interior.notePlaceholder')}" class="note-input w-full p-2 bg-white rounded-lg border-slate-200 focus:ring-2 focus:ring-[#BB16A3] focus:border-transparent"></textarea>
+                `;
+
+                checklistContainer.appendChild(itemDiv);
+                checklistContainer.appendChild(noteDiv);
+                
+                // Set initial state
+                inspectionData.interior[item.id] = { type: getTranslation('sections.interior.statusOk'), notes: '' };
+                updateChecklistItemPrintDisplay(item.id); // Initialize print display
+            };
+
+            const updateChecklistItemPrintDisplay = (id) => {
+                const itemData = inspectionData.interior[id];
+                const printStatusElem = document.getElementById(`print-status-${id}`);
+                const printNoteElem = document.getElementById(`print-note-${id}`);
+
+                if (printStatusElem) {
+                    printStatusElem.textContent = itemData.type;
+                    if (itemData.notes) {
+                        printNoteElem.textContent = `(${itemData.notes})`;
+                    } else {
+                        printNoteElem.textContent = '';
+                    }
+                }
+            };
+
+            checklistContainer.addEventListener('click', (e) => {
+                if (e.target.classList.contains('status-btn')) {
+                    const id = e.target.dataset.id;
+                    const status = e.target.dataset.status;
+                    const container = e.target.parentElement.parentElement;
+                    const noteDiv = container.nextElementSibling;
+                    
+                    container.querySelectorAll('.status-btn').forEach(btn => {
+                        btn.classList.remove('bg-green-500', 'text-white', 'bg-amber-400');
+                        btn.classList.add('bg-slate-200', 'text-slate-800');
+
+                    });
+
+                    if (status === 'ok') {
+                        e.target.classList.add('bg-green-500', 'text-white');
+                        e.target.classList.remove('bg-slate-200', 'text-slate-800');
+                        noteDiv.classList.add('hidden');
+                        inspectionData.interior[id] = { type: getTranslation('sections.interior.statusOk'), notes: '' };
+                        noteDiv.querySelector('textarea').value = '';
+                        noteDiv.querySelector('textarea').classList.remove('highlight-error'); // Remove highlight on status change
+                    } else {
+                        e.target.classList.add('bg-amber-400', 'text-white');
+                        e.target.classList.remove('bg-slate-200', 'text-slate-800');
+                        noteDiv.classList.remove('hidden');
+                        inspectionData.interior[id] = { type: getTranslation('sections.interior.statusNote'), notes: '' };
+                    }
+                    updateSummary();
+                    updateChart();
+                    updateChecklistItemPrintDisplay(id); // Update print display
+                }
+            });
+
+             checklistContainer.addEventListener('input', (e) => {
+                if(e.target.classList.contains('note-input')){
+                    const id = e.target.dataset.id;
+                    inspectionData.interior[id].notes = e.target.value.trim();
+                    // If notes are entered, ensure type is 'Note'
+                    inspectionData.interior[id].type = e.target.value.trim() ? translations.ar.sections.interior.statusNote : translations.ar.sections.interior.statusOk;
+                    
+                    // Update button styles based on current type (note or ok)
+                    const itemDiv = checklistContainer.querySelector(`.flex.items-center.justify-between.bg-slate-100.p-3.rounded-lg > p`)?.parentElement; // Find the parent div of the p tag
+                    if (itemDiv) {
+                         const okButton = itemDiv.querySelector(`button[data-id="${id}"][data-status="ok"]`);
+                         const noteButton = itemDiv.querySelector(`button[data-id="${id}"][data-status="note"]`);
+                        
+                        if (inspectionData.interior[id].type === translations.ar.sections.interior.statusNote) {
+                            noteButton.classList.add('bg-amber-400', 'text-white');
+                            noteButton.classList.remove('bg-slate-200', 'text-slate-800');
+                            okButton.classList.remove('bg-green-500', 'text-white');
+                            okButton.classList.add('bg-slate-200', 'text-slate-800');
+                        } else {
+                            okButton.classList.add('bg-green-500', 'text-white');
+                            okButton.classList.remove('bg-slate-200', 'text-slate-800');
+                            noteButton.classList.remove('bg-amber-400', 'text-white');
+                            noteButton.classList.add('bg-slate-200', 'text-slate-800');
+                        }
+                    }
+                    
+                    e.target.classList.remove('highlight-error'); // Remove highlight when user types
+                    updateSummary();
+                    updateChart();
+                    updateChecklistItemPrintDisplay(id); // Update print display
+                }
+             });
+
+            // Media file handling
+            photoUpload.addEventListener('change', (event) => {
+                photoPreviews.innerHTML = '';
+                inspectionData.media.photos = [];
+                Array.from(event.target.files).forEach(file => {
+                    if (file.type.startsWith('image/')) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            const img = document.createElement('img');
+                            img.src = e.target.result;
+                            img.className = 'image-preview';
+                            photoPreviews.appendChild(img);
+                        };
+                        reader.readAsDataURL(file);
+                        inspectionData.media.photos.push(file.name);
+                    }
+                });
+            });
+
+            videoUpload.addEventListener('change', (event) => {
+                videoFileList.innerHTML = '';
+                inspectionData.media.videos = [];
+                Array.from(event.target.files).forEach(file => {
+                    if (file.type.startsWith('video/')) {
+                        const listItem = document.createElement('div');
+                        listItem.className = 'file-list-item';
+                        listItem.textContent = `${getTranslation('sections.media.videoPrefix')}${file.name}`;
+                        videoFileList.appendChild(listItem);
+                        inspectionData.media.videos.push(file.name);
+                    }
+                });
+            });
+
+            // Star Rating functionality
+            carConditionRatingStars.addEventListener('click', (e) => {
+                if (e.target.classList.contains('star')) {
+                    const value = parseInt(e.target.dataset.value);
+                    inspectionData.basicInfo.carConditionRating = value;
+                    updateStarRatingDisplay(value);
+                }
+            });
+
+            function updateStarRatingDisplay(rating) {
+                const stars = carConditionRatingStars.querySelectorAll('.star');
+                stars.forEach((star, index) => {
+                    if (index < rating) {
+                        star.classList.add('selected');
+                    } else {
+                        star.classList.remove('selected');
+                    }
+                });
+                if (rating > 0) {
+                    selectedRatingText.textContent = `${getTranslation('sections.summary.ratingTitle')}: ${rating} ${getTranslation('sections.summary.ratingStars')}`;
+                } else {
+                    selectedRatingText.textContent = getTranslation('sections.summary.notRated');
+                }
+            }
+
+            // Report Duration Timer functionality
+            function formatTime(seconds) {
+                const minutes = Math.floor(seconds / 60);
+                const remainingSeconds = seconds % 60;
+                return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+            }
+
+            function startTimer() {
+                timerStartTime = Date.now();
+                timerIntervalId = setInterval(() => {
+                    const elapsedTime = Math.floor((Date.now() - timerStartTime) / 1000);
+                    reportTimerElem.textContent = formatTime(elapsedTime);
+                }, 1000);
+            }
+
+            function stopTimer() {
+                clearInterval(timerIntervalId);
+                const finalElapsedTime = Math.floor((Date.now() - timerStartTime) / 1000);
+                // Use the directly retrieved element for text content
+                finalDurationValueElem.textContent = formatTime(finalElapsedTime); 
+                finalDurationTextElem.classList.remove('hidden');
+                reportTimerElem.classList.add('hidden'); // Hide live timer
+            }
+
+            printReportButton.addEventListener('click', () => {
+                if (!validateAllNotes()) {
+                    return; // Stop if validation fails
+                }
+                stopTimer(); // Stop the timer when the report is printed
+                window.print();
+            });
+
+            // Handle accident checkbox change
+            accidentCheckbox.addEventListener('change', (e) => {
+                inspectionData.exterior.accident = e.target.checked;
+                updateSummary();
+                updateChart();
+            });
+
+            // Handle other damages radio button change
+            otherDamagesYesRadio.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    inspectionData.exterior.otherDamages = true;
+                    carDiagramContainer.classList.remove('hidden'); // Show car diagram
+                    updateSummary();
+                    updateChart();
+                }
+            });
+
+            otherDamagesNoRadio.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    inspectionData.exterior.otherDamages = false;
+                    carDiagramContainer.classList.add('hidden'); // Hide car diagram
+                    // Clear existing exterior damages if "No" is selected
+                    Object.keys(inspectionData.exterior).forEach(key => {
+                        if (key !== 'accident' && key !== 'otherDamages') {
+                            delete inspectionData.exterior[key];
+                            const partElement = document.getElementById(key);
+                            if (partElement) {
+                                const indicator = partElement.querySelector('.has-damage-indicator');
+                                if(indicator) indicator.remove();
+                            }
+                        }
+                    });
+                    updateSummary();
+                    updateChart();
+                }
+            });
+
+            // Generic message modal functionality
+            messageModalOkButton.addEventListener('click', () => {
+                messageModal.classList.add('opacity-0');
+                messageModal.querySelector('div').classList.add('scale-95');
+                setTimeout(() => messageModal.classList.add('hidden'), 300);
+            });
+
+            function displayMessage(title, message) {
+                messageModalTitle.textContent = title;
+                messageModalContent.textContent = message;
+                messageModal.classList.remove('hidden');
+                setTimeout(() => {
+                    messageModal.classList.remove('opacity-0');
+                    messageModal.querySelector('div').classList.add('scale-95'); // Changed from remove('scale-95') to add('scale-95')
+                }, 10);
+            }
+
+            // Validation function for notes
+            function validateAllNotes() {
+                let isValid = true;
+                let errorMessages = [];
+                let fieldsToHighlight = [];
+
+                // Clear previous highlights
+                document.querySelectorAll('.highlight-error').forEach(el => el.classList.remove('highlight-error'));
+
+                // 1. Validate Exterior Damages (if otherDamages is true)
+                if (inspectionData.exterior.otherDamages) {
+                    for (const partId in inspectionData.exterior) {
+                        // Skip accident and otherDamages flags
+                        if (partId === 'accident' || partId === 'otherDamages') continue;
+
+                        const partData = inspectionData.exterior[partId];
+                        // Get the original Arabic type value for comparison
+                        const originalDamageType = partData.type;
+
+                        // Condition: If a damage is logged AND notes are empty AND it's NOT a 'minor scratch'
+                        if (partData && partData.notes === '' && originalDamageType !== translations.ar.damageOptions.minorScratch) {
+                            isValid = false;
+                            // Add specific error message for exterior notes if not already added
+                            if (!errorMessages.includes(getTranslation('validation.exteriorNotesRequired'))) {
+                                errorMessages.push(getTranslation('validation.exteriorNotesRequired'));
+                            }
+                            // Highlight the notes textarea within the modal if it's currently open for this part
+                            // and the modal's notes field matches the missing note.
+                            const damageNotesInput = document.getElementById('damage-notes');
+                            const currentPartIdInModal = document.getElementById('part-id').value;
+
+                            if (!modal.classList.contains('hidden') && currentPartIdInModal === partId && damageNotesInput.value.trim() === '') {
+                                fieldsToHighlight.push(damageNotesInput);
+                            }
+                        }
+                    }
+                }
+
+                // 2. Validate Interior Checklist Notes
+                checklistItemsData.forEach(item => {
+                    const itemData = inspectionData.interior[item.id];
+                    // Condition: If status is 'Note' (ملاحظة) AND notes are empty
+                    if (itemData && itemData.type === translations.ar.sections.interior.statusNote && itemData.notes === '') {
+                        isValid = false;
+                        // Add specific error message for interior notes if not already added
+                        if (!errorMessages.includes(getTranslation('validation.interiorNotesRequired'))) {
+                            errorMessages.push(getTranslation('validation.interiorNotesRequired'));
+                        }
+                        // Highlight the notes textarea for the specific checklist item
+                        const noteInput = checklistContainer.querySelector(`textarea[data-id="${item.id}"]`);
+                        if (noteInput) {
+                            fieldsToHighlight.push(noteInput);
+                        }
+                    }
+                });
+
+                if (!isValid) {
+                    let fullMessage = getTranslation('validation.allNotesRequired') + '\n\n' + errorMessages.join('\n');
+                    displayMessage(getTranslation('validation.title'), fullMessage);
+                    fieldsToHighlight.forEach(field => field.classList.add('highlight-error'));
+                }
+
+                return isValid;
+            }
+
+            // AI Summary Generation
+            generateAiSummaryButton.addEventListener('click', async () => {
+                if (!validateAllNotes()) {
+                    return; // Stop if validation fails
+                }
+
+                aiSummaryOutput.innerHTML = `<p class="text-center">${getTranslation('sections.aiSummary.generating')} <div class="loading-spinner mx-auto mt-2"></div></p>`;
+                aiButtonText.textContent = getTranslation('sections.aiSummary.generating');
+                aiLoadingSpinner.classList.remove('hidden'); // Show spinner
+                generateAiSummaryButton.disabled = true;
+
+                let prompt = `أنت خبير في فحص السيارات وتقديم التقارير للعملاء. بناءً على البيانات التالية، قم بإنشاء ملخص موجز واحترافي لحالة السيارة، موجه للعميل. ركز على النقاط الرئيسية وأي أضرار أو ملاحظات تم تسجيلها. إذا لم تكن هناك ملاحظات أو أضرار، اذكر أن السيارة بحالة جيدة بشكل عام. استخدم اللغة العربية الفصحى.`;
+
+                prompt += `\n\n[معلومات أساسية]\n`;
+                prompt += `رقم العقد: ${inspectionData.basicInfo.contractNumber || 'غير محدد'}\n`;
+                prompt += `اسم العميل: ${inspectionData.basicInfo.customerName || 'غير محدد'}\n`;
+                prompt += `موديل السيارة: ${inspectionData.basicInfo.carModel || 'غير محدد'}\n`;
+                prompt += `رقم اللوحة: ${inspectionData.basicInfo.licensePlate || 'غير محدد'} \n`;
+                prompt += `قراءة الكيلومترات: ${inspectionData.basicInfo.carKms || 'غير محدد'} كم\n`;
+                prompt += `تقييم عام للسيارة: ${inspectionData.basicInfo.carConditionRating > 0 ? inspectionData.basicInfo.carConditionRating + ' نجوم' : 'لم يتم التقييم'}\n`;
+                prompt += `اسم الموظف: ${inspectionData.basicInfo.employeeName || 'غير محدد'}\n`;
+                prompt += `الرقم الوظيفي للموظف: ${inspectionData.basicInfo.employeeId || 'غير محدد'}\n`;
+
+                if (inspectionData.exterior.accident) {
+                    prompt += `\n[حالة الحادث]\n`;
+                    prompt += `- تم تحديد أن السيارة تعرضت لحادث سابق.\n`;
+                } else {
+                    prompt += `\n[حالة الحادث]\n`;
+                    prompt += `- لم يتم تحديد تعرض السيارة لحادث سابق.\n`;
+                }
+
+                if (inspectionData.exterior.otherDamages) {
+                    prompt += `\n[تلفيات أخرى لا تخص الحادث]\n`;
+                    prompt += `- توجد تلفيات متفرقة في هيكل السيارة غير مرتبطة بحادث.\n`;
+
+                    const exteriorDamages = Object.entries(inspectionData.exterior).filter(([key,]) => key !== 'accident' && key !== 'otherDamages' && (inspectionData.exterior[key].notes || (inspectionData.exterior[key].estimatedPrice !== null && inspectionData.exterior[key].estimatedPrice !== undefined && inspectionData.exterior[key].estimatedPrice !== 'تقديري')));
+                    if (exteriorDamages.length > 0) {
+                        prompt += `\n[تفاصيل تلفيات الهيكل الخارجي]\n`;
+                        exteriorDamages.forEach(([id, data]) => {
+                            const partName = translations.ar.carParts[partNamesMapping[id]] || id;
+                            const damageTypeTranslated = translations.ar.damageOptions[Object.keys(translations.ar.damageOptions).find(key => translations.ar.damageOptions[key] === data.type)] || data.type;
+                            let priceInfoText = '';
+                            if (data.estimatedPrice !== null && data.estimatedPrice !== undefined && data.estimatedPrice !== 'تقديري') {
+                                let displayPrice = data.estimatedPrice;
+                                if (displayPrice === 'بالاتفاق') {
+                                    displayPrice = 'بالاتفاق';
+                                } else if (displayPrice === 'حسب نوع السيارة وسعر الوكاله') {
+                                    displayPrice = 'حسب نوع السيارة وسعر الوكاله';
+                                }
+                                else {
+                                    displayPrice = `${displayPrice} ريال`;
+                                }
+                                priceInfoText = `, السعر التقديري: ${displayPrice}`;
+                            }
+                            prompt += `- ${partName}: النوع: ${damageTypeTranslated}, ملاحظات: ${data.notes}${priceInfoText}\n`;
+                        });
+                    }
+                } else {
+                    prompt += `\n[تلفيات أخرى لا تخص الحادث]\n`;
+                    prompt += `- لا توجد تلفيات أخرى مسجلة في هيكل السيارة لا تخص الحادث.\n`;
+                }
+
+                const interiorNotes = Object.entries(inspectionData.interior).filter(([, data]) => data.notes);
+                if (interiorNotes.length > 0) {
+                    prompt += `\n[فحص المقصورة والملحقات]\n`;
+                    interiorNotes.forEach(([id, data]) => {
+                        const itemName = translations.ar.checklistItems.find(item => item.id === id)?.name || id;
+                        prompt += `- ${itemName}: ملاحظات: ${data.notes}\n`;
+                    });
+                }
+                
+                // Refine generic no damage message based on new fields
+                if (!inspectionData.exterior.accident && !inspectionData.exterior.otherDamages && interiorNotes.length === 0 && inspectionData.basicInfo.carConditionRating === 0) {
+                    prompt += `\nبناءً على الفحص، لم يتم تسجيل أي حوادث سابقة أو تلفيات أخرى في الهيكل الخارجي، ولا توجد ملاحظات على المقصورة والملحقات. التقييم العام للسيارة غير متوفر.`;
+                } else if (!inspectionData.exterior.accident && !inspectionData.exterior.otherDamages && interiorNotes.length === 0 && inspectionData.basicInfo.carConditionRating > 0) {
+                     prompt += `\nبناءً على الفحص، لم يتم تسجيل أي حوادث سابقة أو تلفيات أخرى في الهيكل الخارجي، ولا توجد ملاحظات على المقصورة والملحقات.`;
+                }
+
+                prompt += `\n\nالملخص المطلوب: (ملخص احترافي لا يتجاوز 150 كلمة)`;
+
+                try {
+                    let chatHistory = [];
+                    chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+                    const payload = { contents: chatHistory };
+                    const apiKey = "";
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+                    
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.candidates && result.candidates.length > 0 &&
+                        result.candidates[0].content && result.candidates[0].content.parts &&
+                        result.candidates[0].content.parts.length > 0) {
+                        const text = result.candidates[0].content.parts[0].text;
+                        aiSummaryOutput.innerHTML = `<p>${text}</p>`;
+                    } else {
+                        aiSummaryOutput.innerHTML = `<p class="text-red-500">${getTranslation('sections.aiSummary.errorGeneric')}</p>`;
+                        console.error('Gemini API response structure unexpected:', result);
+                    }
+
+                } catch (error) {
+                    aiSummaryOutput.innerHTML = `<p class="text-red-500">${getTranslation('sections.aiSummary.errorAPI')}${error.message}</p>`;
+                    console.error('Error calling Gemini API:', error);
+                } finally {
+                    aiButtonText.textContent = getTranslation('sections.aiSummary.buttonText');
+                    aiLoadingSpinner.classList.add('hidden'); // Hide spinner
+                    generateAiSummaryButton.disabled = false;
+                }
+            });
+
+            // Invoice Generation Logic
+            generateInvoiceButton.addEventListener('click', () => {
+                if (!validateAllNotes()) {
+                    return; // Stop if validation fails
+                }
+
+                invoiceItemsBody.innerHTML = ''; // Clear previous items
+                let subtotal = 0;
+                let hasNumericalCosts = false;
+
+                // Only include exterior damages in invoice if otherDamages is true
+                const damagesWithPrices = inspectionData.exterior.otherDamages ?
+                    Object.entries(inspectionData.exterior).filter(([, data]) => 
+                        (typeof data.estimatedPrice === 'number' && !isNaN(data.estimatedPrice)) ||
+                        data.estimatedPrice === 'بالاتفاق' || data.estimatedPrice === 'حسب نوع السيارة وسعر الوكاله' || data.estimatedPrice === 'تقديري'
+                    ) : [];
+
+                if (damagesWithPrices.length > 0) {
+                    damagesWithPrices.forEach(([id, data]) => {
+                        const partName = translations[currentLanguage].carParts[partNamesMapping[id]] || id;
+                        let costDisplay = '';
+                        let costNumerical = 0;
+
+                        if (typeof data.estimatedPrice === 'number' && !isNaN(data.estimatedPrice)) {
+                            costDisplay = `${data.estimatedPrice} ${getTranslation('currency.SAR')}`;
+                            costNumerical = data.estimatedPrice;
+                            hasNumericalCosts = true;
+                        } else if (data.estimatedPrice === 'بالاتفاق') {
+                            costDisplay = getTranslation('modal.byAgreement');
+                        } else if (data.estimatedPrice === 'حسب نوع السيارة وسعر الوكاله') {
+                            costDisplay = getTranslation('defaultPartPrices.byVehicleType');
+                        } else if (data.estimatedPrice === 'تقديري') {
+                            costDisplay = getTranslation('modal.estimated');
+                        } else {
+                            costDisplay = '--';
+                        }
+
+                        subtotal += costNumerical;
+
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td class="p-2 border-b border-slate-200">${partName}</td>
+                            <td class="p-2 border-b border-slate-200">${costDisplay}</td>
+                        `;
+                        invoiceItemsBody.appendChild(row);
+                    });
+                }
+
+                invoiceSubtotalElem.textContent = `${subtotal} ${getTranslation('currency.SAR')}`;
+                const vatRate = 0.15;
+                const vatAmount = subtotal * vatRate;
+                const totalWithVat = subtotal + vatAmount;
+
+                invoiceVatElem.textContent = `${vatAmount.toFixed(2)} ${getTranslation('currency.SAR')}`;
+                invoiceTotalElem.textContent = `${totalWithVat.toFixed(2)} ${getTranslation('currency.SAR')}`;
+
+                if (hasNumericalCosts) {
+                    invoiceSection.style.display = 'block';
+                    noRepairCostsMessage.style.display = 'none';
+                } else {
+                    invoiceSection.style.display = 'block'; // Still show the section but with message
+                    invoiceItemsBody.innerHTML = ''; // Clear items if no numerical costs
+                    noRepairCostsMessage.style.display = 'block';
+                    invoiceSubtotalElem.textContent = `0 ${getTranslation('currency.SAR')}`;
+                    invoiceVatElem.textContent = `0.00 ${getTranslation('currency.SAR')}`;
+                    invoiceTotalElem.textContent = `0.00 ${getTranslation('currency.SAR')}`;
+                }
+            });
+
+
+            // Initialize
+            setLanguage(currentLanguage); // Set initial language
+            // Removed direct call: checklistItemsData.forEach(createChecklistItem); 
+            // It will be called inside setLanguage instead.
+            updateSummary();
+            updateChart();
+            updateStarRatingDisplay(inspectionData.basicInfo.carConditionRating); // Set initial display
+            startTimer(); // Start the timer when the page loads
+            setApplicationMode('pickup'); // Set initial mode to pickup
+
+            // Populate print-only display fields initially
+            for (const id in basicInfoInputs) {
+                const inputElement = document.getElementById(id);
+                const printElement = document.getElementById(`print-${id}`);
+                if (inputElement && printElement) {
+                    printElement.textContent = inputElement.value;
+                }
+            }
+        });
+    </script>
+</body>
+</html>
